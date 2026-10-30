@@ -1,0 +1,17 @@
+SYNTHETIC ANALYTICS FIXTURE - NOT AN OFFICIAL SYLLABUS
+Demo Institute of Technology | CS201 | Academic Year 2024-25
+
+Unit 1: Algorithm Analysis
+Asymptotic notation; time complexity; worst-case analysis; binary search; recurrence relations.
+
+Unit 2: Linear Structures
+Arrays; linked lists; stacks; queues; LIFO and FIFO behaviour.
+
+Unit 3: Trees
+Binary trees; binary search trees; tree traversal; tree height.
+
+Unit 4: Graphs
+Graph traversal; adjacency matrix; adjacency list; breadth-first search.
+
+Unit 5: Sorting and Hashing
+Comparison sorting; merge sort; hash tables; collisions; range queries.

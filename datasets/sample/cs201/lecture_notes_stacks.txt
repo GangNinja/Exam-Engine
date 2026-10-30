@@ -1,0 +1,28 @@
+CS201 Lecture Notes 03 - Stacks, Queues and Complexity (SYNTHETIC)
+Demo Institute of Technology | Academic Year 2024-25
+
+This note is synthetic material written for the ingestion pipeline test suite.
+It is not copied from any textbook or lecture handout.
+
+1. Stack
+A stack is a linear structure with last-in-first-out discipline.
+Operations: push(x), pop(), peek(), is_empty().
+All operations run in O(1) time when the stack is backed by a dynamic array.
+
+2. Queue
+A queue is first-in-first-out. A circular buffer implements it in O(1) per
+operation. For a queue with capacity n, the invariant is:
+    (head + size) mod n = tail
+Use <= rather than < when comparing indices, because a full buffer and an
+empty buffer are distinguished by the size counter.
+
+3. Asymptotics
+Growth rates: O(1) < O(log n) < O(n) < O(n log n) < O(n^2).
+For n = 1000, log2(n) is approximately 10, so binary search needs at most
+10 comparisons in the worst case.
+
+4. Mathematical notation that must survive cleaning
+    sum_{i=1}^{n} i = n(n + 1) / 2
+    T(n) = 2T(n/2) + O(n) => T(n) = O(n log n)
+    f(x) = x^2 + 3x - 5, with f'(x) = 2x + 3
+These expressions must not be rewritten or stripped by the ingestion layer.

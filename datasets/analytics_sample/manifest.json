@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "dataset": {
+    "source_id": "demo-analytics-synthetic",
+    "name": "Phase 4 synthetic analytics fixture",
+    "dataset_type": "synthetic",
+    "retrieved_at": "2026-10-28",
+    "license": "CC0-1.0",
+    "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "publisher": "Exam Engine project",
+    "notes": "Synthetic multi-session fixture for Phase 4 analytics. It is not an official examination paper and must not be presented as historical university data."
+  },
+  "courses": [
+    {
+      "course_id": "demo-analytics-cs201-2024-v1",
+      "course_code": "CS201",
+      "title": "Data Structures and Algorithms (Analytics Fixture)",
+      "institution_code": "demo-iot",
+      "institution_name": "Demo Institute of Technology",
+      "department": "Computer Science and Engineering",
+      "programme": "B.Tech",
+      "academic_year": "2024-25",
+      "syllabus_version": "v1",
+      "description": "SYNTHETIC analytics fixture with three examination sessions.",
+      "documents": [
+        {
+          "path": "syllabus.txt",
+          "kind": "syllabus",
+          "title": "SYNTHETIC CS201 syllabus"
+        },
+        {
+          "path": "paper_2024_midterm.txt",
+          "kind": "question_paper",
+          "title": "SYNTHETIC 2024 midterm",
+          "academic_year": "2024-25",
+          "publication_date": "2024-06-01",
+          "metadata": {
+            "exam_session": "2024-05",
+            "exam_type": "midterm",
+            "exam_date": "2024-05-12"
+          }
+        },
+        {
+          "path": "paper_2024_final.txt",
+          "kind": "question_paper",
+          "title": "SYNTHETIC 2024 final",
+          "academic_year": "2024-25",
+          "publication_date": "2024-12-01",
+          "metadata": {
+            "exam_session": "2024-11",
+            "exam_type": "final",
+            "exam_date": "2024-11-20"
+          }
+        },
+        {
+          "path": "paper_2025_midterm.txt",
+          "kind": "question_paper",
+          "title": "SYNTHETIC 2025 midterm",
+          "academic_year": "2024-25",
+          "publication_date": "2025-05-01",
+          "metadata": {
+            "exam_session": "2025-04",
+            "exam_type": "midterm",
+            "exam_date": "2025-04-15"
+          }
+        }
+      ]
+    }
+  ]
+}

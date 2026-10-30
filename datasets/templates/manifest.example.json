@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "dataset": {
+    "source_id": "replace-with-lowercase-slug",
+    "name": "Human readable dataset name",
+    "dataset_type": "permissioned",
+    "retrieved_at": "2026-01-01",
+    "license": "State the licence, permission or terms here",
+    "license_url": null,
+    "source_url": "https://example.org/where-the-files-came-from",
+    "publisher": "Who published the material",
+    "usage_terms": null,
+    "notes": "How the files were obtained and any scope limits.",
+    "external_dataset": true
+  },
+  "courses": [
+    {
+      "course_id": "inst-cs201-2024-v1",
+      "course_code": "CS201",
+      "title": "Course title",
+      "institution_code": "inst",
+      "institution_name": "Institution name",
+      "department": "Department",
+      "programme": "B.Tech",
+      "academic_year": "2024-25",
+      "syllabus_version": "v1",
+      "description": null,
+      "metadata": {},
+      "documents": [
+        {
+          "path": "cs201/question_paper.pdf",
+          "kind": "question_paper",
+          "format": null,
+          "title": "Midterm question paper",
+          "academic_year": "2024-25",
+          "publication_date": null,
+          "language": "en",
+          "metadata": {}
+        },
+        {
+          "path": "cs201/syllabus.pdf",
+          "kind": "syllabus",
+          "title": "Syllabus v1"
+        },
+        {
+          "path": "cs201/question_bank.csv",
+          "kind": "question_bank",
+          "title": "Department question bank"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+Demo Institute of Technology
+PHY101 - Physics I: Mechanics and Waves
+Final Examination - Synthetic Practice Paper
+Academic Year 2024-25 | Maximum Marks: 40
+SYNTHETIC PAPER: generated for development testing, not an official examination.
+
+PART A - Short Answer
+
+1. State Newton's three laws of motion and give one example of each. (5 marks)
+
+2. A block of mass 2 kg slides down a frictionless incline of 30 degrees.
+   Calculate its acceleration. Use g = 9.8 m/s^2. (5 marks)
+
+PART B - Long Answer
+
+3. Derive the expression for the time period of a simple pendulum and state
+   the assumptions used. (10 marks)
+
+4. Explain the superposition principle for two travelling waves and write the
+   resulting expression for a standing wave. [10 marks]
+
+5. A spring of constant k = 200 N/m carries a 0.5 kg mass. Find the angular
+   frequency and the period of oscillation. [6]
+
+6. Describe the difference between transverse and longitudinal waves with one
+   example of each. (4 marks)

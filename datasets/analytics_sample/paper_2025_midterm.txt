@@ -1,0 +1,18 @@
+SYNTHETIC ANALYTICS PAPER - NOT AN OFFICIAL EXAMINATION
+Demo Institute of Technology | CS201 | Midterm Examination
+
+PART A - Short Answer
+
+1. Explain the worst-case running time of binary search. [5 marks]
+
+2. Compare arrays and linked lists for insertion in the middle. [5 marks]
+
+PART B - Long Answer
+
+3. Explain tree traversal and give one example. [8 marks]
+
+4. Calculate the height of a binary tree with 31 nodes. [6 marks]
+
+5. Design a hash table and evaluate its collision behaviour. [10 marks]
+
+6. Define a queue and describe its first-in-first-out behaviour. [5 marks]

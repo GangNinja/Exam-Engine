@@ -1,0 +1,16 @@
+PHY101 Physics I: Mechanics and Waves - Syllabus (SYNTHETIC)
+Demo Institute of Technology | Academic Year 2024-25 | Version v1
+
+MODULE 1: Kinematics and Dynamics (12 hours)
+- Rectilinear motion and uniformly accelerated motion
+- Newton's laws and inertial frames
+- Work, energy and conservation principles
+
+MODULE 2: Oscillations (8 hours)
+- Simple harmonic motion and the pendulum
+- Damped and forced oscillations; resonance
+
+MODULE 3: Waves (10 hours)
+- Transverse and longitudinal waves
+- Superposition, interference and standing waves
+- Sound waves and the Doppler effect

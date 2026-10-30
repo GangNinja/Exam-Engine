@@ -1,0 +1,18 @@
+SYNTHETIC ANALYTICS PAPER - NOT AN OFFICIAL EXAMINATION
+Demo Institute of Technology | CS201 | Midterm Examination
+
+PART A - Short Answer
+
+1. Define a stack and explain its last-in-first-out behaviour. [5 marks]
+
+2. Explain the worst-case time complexity of binary search. (5 marks)
+
+PART B - Long Answer
+
+3. Compare arrays and linked lists for insertion in the middle. [5 marks]
+
+4. Derive the recurrence relation for merge sort and solve it. [10 marks]
+
+5. Design a hash table that handles collisions. [8 marks]
+
+6. Describe breadth-first graph traversal with one example. [7 marks]

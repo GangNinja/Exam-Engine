@@ -1,0 +1,42 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+data/
+*.db
+*.db-wal
+*.db-shm
+.env
+
+# Downloaded third-party datasets: keep originals out of version control unless
+# their licence clearly permits redistribution.
+datasets/external/
+
+# Tool/agent state that is specific to this machine.
+.freebuff/
+.tmp-hairline/
+
+# Generated reports and coverage artefacts from the quickstart commands.
+reports/
+coverage.xml
+.coverage.*
+
+# Browser dependencies are installed from the lockfile, never committed.
+node_modules/
+
+# SQLite side files beyond the database that is already ignored above.
+*.db-journal
+*.sqlite3
+
+# Operating-system and editor noise.
+.DS_Store
+Thumbs.db

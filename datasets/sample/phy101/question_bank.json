@@ -1,0 +1,66 @@
+{
+  "dataset_note": "SYNTHETIC - development fixture, not an official exam paper",
+  "questions": [
+    {
+      "number": "1",
+      "text": "State Newton's three laws of motion.",
+      "marks": 5,
+      "section": "PART A",
+      "unit": "Module 1",
+      "difficulty": "easy",
+      "answer": "Inertia; F = ma; action-reaction pairs.",
+      "tags": [
+        "Newton",
+        "laws of motion"
+      ]
+    },
+    {
+      "number": "2",
+      "text": "Calculate the acceleration of a 2 kg block on a frictionless 30 degree incline.",
+      "marks": 5,
+      "section": "PART A",
+      "unit": "Module 1",
+      "difficulty": "medium",
+      "tags": [
+        "incline",
+        "dynamics"
+      ]
+    },
+    {
+      "number": "3",
+      "text": "Derive the time period of a simple pendulum.",
+      "marks": 10,
+      "section": "PART B",
+      "unit": "Module 2",
+      "difficulty": "hard",
+      "tags": [
+        "pendulum",
+        "SHM"
+      ]
+    },
+    {
+      "number": "4",
+      "text": "Explain superposition for two travelling waves and derive the standing wave.",
+      "marks": 10,
+      "section": "PART B",
+      "unit": "Module 3",
+      "difficulty": "medium",
+      "tags": [
+        "waves",
+        "superposition"
+      ]
+    },
+    {
+      "number": "5",
+      "text": "Find the angular frequency and period of a 0.5 kg mass on a 200 N/m spring.",
+      "marks": 6,
+      "section": "PART B",
+      "unit": "Module 2",
+      "difficulty": "medium",
+      "tags": [
+        "spring",
+        "oscillation"
+      ]
+    }
+  ]
+}

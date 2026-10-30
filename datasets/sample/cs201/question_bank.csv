@@ -1,0 +1,9 @@
+number,text,marks,section,unit,difficulty,answer,tags,note
+1,Define a stack and describe its last-in-first-out behaviour.,5,SECTION A,Unit 2,easy,A stack supports push and pop at one end; the most recent element is removed first.,stack; LIFO; abstract data type,"SYNTHETIC - development fixture, not an official exam paper"
+2,Compare arrays and linked lists for mid-sequence insertion.,5,SECTION A,Unit 2,easy,,array; linked list,"SYNTHETIC - development fixture, not an official exam paper"
+3,Show that binary search on a sorted array runs in O(log n).,4,SECTION A,Unit 1,medium,,binary search; complexity,"SYNTHETIC - development fixture, not an official exam paper"
+4,"Trace insertion sort on the array [3, 1, 4, 1, 5, 9, 2, 6].",8,SECTION B,Unit 5,medium,,insertion sort; tracing,"SYNTHETIC - development fixture, not an official exam paper"
+5,Derive and solve the worst-case recurrence for merge sort.,10,SECTION B,Unit 5,hard,,merge sort; recurrence,"SYNTHETIC - development fixture, not an official exam paper"
+6,What is the maximum height of a binary tree with 15 nodes?,8,SECTION B,Unit 3,medium,,binary tree; height,"SYNTHETIC - development fixture, not an official exam paper"
+7,Write pseudocode that detects a cycle in a singly linked list.,10,SECTION B,Unit 2,hard,,linked list; cycle detection; Floyd,"SYNTHETIC - development fixture, not an official exam paper"
+8,Explain why comparison sorting cannot beat O(n log n) in the worst case.,,SECTION B,Unit 5,hard,,lower bound; decision tree,"SYNTHETIC - development fixture, not an official exam paper"

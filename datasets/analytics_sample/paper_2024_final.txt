@@ -1,0 +1,18 @@
+SYNTHETIC ANALYTICS PAPER - NOT AN OFFICIAL EXAMINATION
+Demo Institute of Technology | CS201 | Final Examination
+
+PART A - Short Answer
+
+1. Define a stack and explain its last-in-first-out behaviour. [5 marks]
+
+2. Explain the worst-case running time of binary search. (5 marks)
+
+PART B - Long Answer
+
+3. Compare adjacency matrix and adjacency list representations. [10 marks]
+
+4. Derive the recurrence relation for merge sort and solve it. [10 marks]
+
+5. Explain how a binary search tree supports range queries. [8 marks]
+
+6. Design a graph traversal for a social network. [7 marks]
