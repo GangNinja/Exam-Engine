@@ -133,24 +133,39 @@ files out of version control.
 out of git unless the licence clearly permits redistribution. The repository ships
 only the synthetic sample, which this project generates itself.
 
-## 5. Phase 13 boundary — personal data
+## 5. Phase 13 personal examination corpus
 
-The user's own syllabus and question papers are reserved for **Phase 13 — Personal
-Data Integration & Validation**. They must not be mixed into the synthetic sample
-and are not required by this phase.
+Phase 13 reads the user's GATE, CBSE Class 10/12, JEE Advanced, JEE Mains and NEET
+corpus in place under `datasets/`. It never renames, moves, deletes or overwrites
+an original CSV or PDF. The source folders remain the authoritative copies.
 
-The same machinery is ready for them:
+The import is deliberately separate from the synthetic manifest path:
 
-* a separate manifest with `dataset_type=permissioned` (or `official`), recording
-  who gave permission and when;
-* a distinct `source_id`, e.g. `personal-<institution>-2026`;
-* the same pipeline, duplicate detection and run reports;
-* validation of extracted questions against the personal documents before they are
-  used downstream (that validation belongs to Phase 13, not Phase 1).
+* one course per category/subject (`gate-chemistry`, `cbse-class-12-physics`,
+  `jee-advanced-maths`, `neet-biology`, and so on);
+* each CSV is ingested as a `question_bank` document, each matched syllabus PDF as
+  a `syllabus` document, recorded against source
+  `personal-exam-datasets`;
+* import runs, file-level results and skipped duplicates are persisted;
+* the audit writes `dataset_inventory.csv`,
+  `dataset_validation_report.csv` and `dataset_summary.json` before any database
+  write;
+* missing answers, options, marks and years stay missing and are counted as
+  warnings; nothing is fabricated or inferred across exam categories.
 
-To remove personal material later, delete its documents (cascades to pages,
-questions and syllabi) or use a dedicated database file. Provenance rows remain so
-the deletion is auditable.
+Run:
+
+```bash
+python -m exam_engine exams discover
+python -m exam_engine exams audit
+python -m exam_engine exams import
+python -m exam_engine exams status
+```
+
+To remove personal material later, use a dedicated database file or delete its
+course documents through the existing repository/service. Provenance and import
+run rows remain the audit trail. Do not commit the corpus unless its licence
+clearly permits redistribution.
 
 ## 6. Provenance checklist
 

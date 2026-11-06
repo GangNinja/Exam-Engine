@@ -316,7 +316,10 @@ def test_generation_persists_a_grounded_question(database: Database) -> None:
     assert batch.status is GenerationStatus.OK
     assert batch.counts.requested == 2
     assert batch.counts.persisted == 2
-    assert {warning.code for warning in batch.warnings} >= {"generation_review_required"}
+    assert all(
+        question.review_status is GenerationReviewStatus.PENDING_REVIEW
+        for question in batch.questions
+    )
     assert batch.provider == "template"
     assert batch.algorithm_version == "phase10.v1"
 
@@ -1279,6 +1282,28 @@ def test_review_transitions_and_approved_questions_are_protected(
     )
     assert reopened.review_status is GenerationReviewStatus.PENDING_REVIEW
     assert len(reopened.review_history) == 3
+
+
+def test_review_returns_the_revision_it_stored(database: Database) -> None:
+    _seed(database)
+    batch = _explain(database, unit_id=_unit(database, "Linear Structures"), count=1)
+    question = batch.questions[0]
+    service = _service(database)
+
+    first = service.set_review_status(
+        question.question_id, GenerationReviewStatus.APPROVED, note="first"
+    )
+    assert first.revision == question.revision + 1
+
+    # A client may chain decisions with the revision the service returned.
+    second = service.set_review_status(
+        question.question_id,
+        GenerationReviewStatus.REJECTED,
+        expected_revision=first.revision,
+        note="second",
+    )
+    assert second.review_status is GenerationReviewStatus.REJECTED
+    assert second.revision == first.revision + 1
 
 
 def test_batch_review_and_export(database: Database, tmp_path: Path) -> None:

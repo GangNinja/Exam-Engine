@@ -515,6 +515,8 @@ def _check_cognitive(findings: _Findings) -> None:
             "cognitive.bloom_alignment",
             severity=Severity.INFO,
         )
+    elif question.generation_metadata.get("bloom_explicit") is False:
+        pass
     else:
         if question.estimated_bloom is not question.requested_bloom:
             findings.add(
@@ -547,7 +549,10 @@ def _check_cognitive(findings: _Findings) -> None:
             "cognitive.difficulty_alignment",
             severity=Severity.INFO,
         )
-    elif question.estimated_difficulty is not question.requested_difficulty:
+    elif (
+        question.estimated_difficulty is not question.requested_difficulty
+        and question.generation_metadata.get("difficulty_explicit") is not False
+    ):
         findings.add(
             "difficulty_mismatch",
             (

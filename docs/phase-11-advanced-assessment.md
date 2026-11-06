@@ -477,6 +477,8 @@ validated only as software. Personal teaching material remains reserved for Phas
 Implemented: mutation, adversarial generation, misconception mining, review and export,
 plus the migration, models, CLI and tests above.
 
-Not implemented: Phase 12 (full integration, dashboard, final evaluation) and Phase 13
-(personal data integration). Also absent by design: automatic approval, answer grading,
-forecasting, and any inference about a student's ability.
+Not implemented: Phase 13 (personal data integration). The Phase 12 dashboard
+integrates these services. Also absent by design: automatic approval, examination
+scoring, forecasting, and any inference about a student's ability. Local Practice
+answer checks are different: they are transparent lexical feedback over a stored
+question, not an assessment of a learner.

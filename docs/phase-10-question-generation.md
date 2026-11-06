@@ -14,11 +14,16 @@ It is deliberately **grounded and review-first**:
   evidence, so it cannot invent a definition, number or formula;
 * automated validation proves only that checkable properties held — passing it is
   never a claim of educational correctness;
-* every question starts in `pending_review` and stays practice material.
+* a multi-question request can expand across other in-scope concepts instead of
+  repeating one prompt;
+* every question starts in `pending_review` (shown as `Draft` in the dashboard)
+  and stays practice material.
 
-Phase 10 does **not** implement advanced assessment intelligence (Phase 11),
-dashboard integration (Phase 12) or personal data integration (Phase 13), and it
-does not predict real examination content.
+Phase 10 does **not** implement advanced assessment intelligence (Phase 11) or
+personal data integration (Phase 13), and it does not predict real examination
+content. The Phase 12 dashboard calls this package; its answer checks are a
+separate local feedback layer over stored questions, not a generation or grading
+model.
 
 ## Status and architecture
 
@@ -32,7 +37,8 @@ Phases 1–9 and writes only to its own two tables.
 | [`src/exam_engine/generation/providers.py`](../src/exam_engine/generation/providers.py) | The `GenerationProvider` protocol, the offline template provider and an opt-in OpenAI-compatible provider |
 | [`src/exam_engine/generation/validation.py`](../src/exam_engine/generation/validation.py) | Twenty-five named checks over an assembled question, grouped structure / alignment / answerability / MCQ / quality / cognitive |
 | [`src/exam_engine/generation/dedupe.py`](../src/exam_engine/generation/dedupe.py) | Duplicate and variant detection against existing generated and historical questions, reusing Phase 3 similarity |
-| [`src/exam_engine/generation/service.py`](../src/exam_engine/generation/service.py) | Scope resolution, target/evidence selection, provider calls, assembly, validation, dedupe, persistence and review |
+| [`src/exam_engine/generation/service.py`](../src/exam_engine/generation/service.py) | Scope resolution, target expansion/evidence selection, provider calls, assembly, validation, dedupe, persistence and review |
+| [`src/exam_engine/generation/grading.py`](../src/exam_engine/generation/grading.py) | Local multiple-choice and lexical free-text checks used by the dashboard; study feedback with explicit limitations, never an examination mark |
 | [`src/exam_engine/storage/generation_repository.py`](../src/exam_engine/storage/generation_repository.py) | Batch and question persistence, listing, revision-safe saves and report export |
 | [`src/exam_engine/storage/generation_mappers.py`](../src/exam_engine/storage/generation_mappers.py) | Row ↔ model mapping, including JSON columns and option/answer keys |
 | [`src/exam_engine/storage/migrations/0007_generated_questions.sql`](../src/exam_engine/storage/migrations/0007_generated_questions.sql) | `generation_batches` and `generated_questions` with course/syllabus foreign keys and lookup indexes |
@@ -73,6 +79,13 @@ counted and reported (`generation_unplaced_concepts`) rather than silently
 dropped or substituted. The resolved targets, and any defaults applied, are echoed
 into the batch report.
 
+With `expand_batch` enabled, the selected concept(s) stay first and the resolver
+continues through their units, then other units of the same syllabus, in
+deterministic order until it has enough distinct targets. It keeps a small spare
+list so a duplicate or rejected attempt can fall through to another concept
+without repeating a prompt. The expansion is recorded as
+`generation_batch_expanded`.
+
 ### 3. Evidence selection
 
 Candidate passages are sentences from the course's **syllabus, notes and other
@@ -84,12 +97,14 @@ A passage is a sentence that names the concept, focused to the matching clause a
 capped at `max_evidence_chars`. Sentences that name the concept itself outrank
 sentences that only use one of its words, and those words — including a simple
 singular — are a documented fallback: a syllabus topic stored as "Stacks and
-queues" still finds the notes sentence "A stack is a linear structure …". Table
-rows and layout fragments are skipped because they mention a concept without
-describing it. Passages keep syllabus-first, then shortest-first order and are cut
-at `max_evidence_passages`. When document text is thin, the service falls back to
-a syllabus-topic passage so a question is still grounded in something a reader can
-check, and marks the batch as thin-evidence.
+queues" still finds the notes sentence "A stack is a linear structure …". When at
+least one sentence names the concept exactly, loose word-level matches are
+discarded for that question, so the answer key cannot quote an unrelated sentence
+that merely shares a word. Table rows and layout fragments are skipped because
+they mention a concept without describing it. Passages keep syllabus-first, then
+shortest-first order and are cut at `max_evidence_passages`. When document text is
+thin, the service falls back to a syllabus-topic passage so a question is still
+grounded in something a reader can check, and marks the batch as thin-evidence.
 
 A comparison additionally needs a passage for the second concept. Same-unit
 siblings are tried first (they are also the options a reader sees), and a graph
@@ -155,9 +170,12 @@ and are recorded as conventions, not measurements.
 
 Where the template's answer mode is a quoted excerpt, the key is that excerpt with
 its document title; where two concepts are compared, both excerpts are the
-reference material. Open-ended tasks (design, evaluation above the lowest levels)
-have **no** answer key, because a template cannot derive one without inventing a
-model answer. `--no-answer-key` and `--no-explanation` suppress both.
+reference material. If the only stored evidence is the syllabus topic itself, the
+provider does not dress those words up as a definition: it stores a source-limited
+rubric (`answer_key_status="rubric_only"`) with an expected-answer outline split
+from the topic and says the source does not provide a definition. Open-ended tasks
+(design, evaluation above the lowest levels) have **no** answer key, because a
+template cannot derive one without inventing a model answer. `--no-answer-key` and `--no-explanation` suppress both.
 `EXAM_ENGINE_Q10_REQUIRE_ANSWER_EVIDENCE` (default on) makes a key that quotes
 material absent from the cited evidence a hard rejection (`answer_key_unverified`);
 with it off, the same finding is a review warning instead. A key that is not a
@@ -243,10 +261,12 @@ Migration `0007_generated_questions.sql` adds:
   review status and history, revision, warnings and limitations.
 
 Batch status describes **completeness only**: `ok` means every requested question
-was produced, `partial` means fewer were produced (rejections, duplicates, provider
-failures or incomplete validation), and `failed` means none were. Needing review
-does not make a batch partial; items in that state produce a
-`generation_review_required` note and remain `pending_review` until a person decides.
+was produced, `partial` means fewer were produced for any reason, and `failed`
+means none were. A rejection or duplicate that a spare concept fills does not by
+itself make an otherwise complete batch partial; the decision remains in the
+report. Needing review does not make a batch partial; items in that state produce
+a `generation_review_required` note and remain `pending_review` until a person
+decides.
 
 Review flow:
 
@@ -404,10 +424,10 @@ Not ready for:
 ## Known limitations
 
 * The deterministic provider has **one** construction per `(format, Bloom level)`
-  pair. Asking for several questions on a single concept therefore produces the
-  same wording; duplicates are detected and the batch is reported as `partial`
-  instead of padded. Breadth comes from more targets, formats or levels, not from
-  repetition.
+  pair. With `expand_batch` it can vary a multi-question batch by moving through
+  other concepts, but asking for several questions on one concept alone still
+  produces duplicate wording; duplicates are detected and reported rather than
+  padded. Breadth comes from more targets, formats or levels, not repetition.
 * Templates compose task statements around quoted evidence. They do not paraphrase,
   define terms or supply model answers, so an open-ended item's answer key is often
   absent by design.
@@ -419,6 +439,10 @@ Not ready for:
   ("Stacks and queues") and the evidence describes one part of it ("A stack is
   first-in-first-out"), the item is answerable but less precise than a hand-written
   one, and the mismatch is left for the reviewer rather than hidden.
+* The dashboard's answer check is lexical: it compares multiple choice with the
+  stored key, and free text with stored terms and expected points. It can
+  under-credit a correct paraphrase and over-credit keyword stuffing; it is not an
+  examination grade and does not persist attempts.
 * Segmentation sometimes glues a section heading to its sentence ("2. Queue A queue
   is …"). Such a heading is dropped when masking consumed it, but a heading that is
   not the answer can still appear in a stem.
@@ -438,7 +462,8 @@ Not ready for:
 
 ## Out of scope
 
-Automatic answer grading, student response modelling, adaptive practice
-sequencing, exam-paper assembly, misconception mining (Phase 11), dashboard
-integration (Phase 12) and personal data integration (Phase 13). Phase 10 produces
-reviewable practice questions; it does not write examinations.
+Automatic examination grading, student response modelling, adaptive practice
+sequencing, exam-paper assembly, misconception mining (Phase 11) and personal data
+integration (Phase 13). Phase 10 produces reviewable practice questions; the
+Phase 12 dashboard offers local formative answer checks over those stored
+questions, but neither layer writes examinations or awards an examination mark.

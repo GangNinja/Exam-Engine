@@ -512,8 +512,10 @@ def _print_batch(batch, *, dry_run: bool = False) -> None:
 from exam_engine.cli_advanced import register_advanced_commands  # noqa: E402
 from exam_engine.cli_analytics import register_analytics_commands  # noqa: E402
 from exam_engine.cli_coverage import register_coverage_commands  # noqa: E402
+from exam_engine.cli_dashboard import register_dashboard_commands  # noqa: E402
 from exam_engine.cli_evolution import register_evolution_commands  # noqa: E402
 from exam_engine.cli_exam_dna import register_exam_dna_commands  # noqa: E402
+from exam_engine.cli_exams import register_exams_commands  # noqa: E402
 from exam_engine.cli_generation import register_generation_commands  # noqa: E402
 from exam_engine.cli_graph import register_graph_commands  # noqa: E402
 from exam_engine.cli_nlp import register_nlp_commands  # noqa: E402
@@ -530,6 +532,8 @@ register_exam_dna_commands(app, open_db=_open, get_settings=_settings)
 register_evolution_commands(app, open_db=_open, get_settings=_settings)
 register_generation_commands(app, open_db=_open, get_settings=_settings)
 register_advanced_commands(app, open_db=_open, get_settings=_settings)
+register_dashboard_commands(app, get_settings=_settings)
+register_exams_commands(app, open_db=_open, get_settings=_settings)
 
 
 if __name__ == "__main__":  # pragma: no cover

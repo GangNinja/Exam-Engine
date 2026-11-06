@@ -227,6 +227,7 @@ class _Plan:
     targets: tuple[_Concept, ...]
     reference_style: dict[str, Any]
     defaults_applied: dict[str, str]
+    spares: tuple[_Concept, ...] = ()
 
 
 # -- service -------------------------------------------------------------------
@@ -347,6 +348,31 @@ class QuestionGenerationService:
         scope = self._scope(plan, loaded)
         parameters = self._parameters(request, loaded, plan, generation_provider)
         warnings: list[Uncertainty] = list(loaded.warnings)
+        selected_ids = {
+            concept.concept_id
+            for concept in loaded.concepts
+            if concept.concept_id in request.concept_ids
+        }
+        expanded = [
+            concept
+            for concept in plan.targets
+            if request.concept_ids and concept.concept_id not in selected_ids
+        ]
+        if request.expand_batch and expanded:
+            warnings.append(
+                Uncertainty(
+                    code="generation_batch_expanded",
+                    message=(
+                        f"The batch continued across {len(expanded)} additional syllabus "
+                        "concept(s) so each requested question is a distinct prompt."
+                    ),
+                    severity=Severity.INFO,
+                    detail={
+                        "selected": sorted(selected_ids),
+                        "added": [item.concept_id for item in expanded],
+                    },
+                )
+            )
         counts = GenerationCounts(requested=request.count)
         questions: list[GeneratedQuestion] = []
         rejections: list[GenerationRejection] = []
@@ -358,8 +384,14 @@ class QuestionGenerationService:
         historical_pool = [self._historical_item(item) for item in loaded.historical]
         concept_cache: dict[str, list[SourcePassage]] = {}
 
-        for index in range(request.count):
-            concept = plan.targets[index % len(plan.targets)]
+        if request.expand_batch:
+            attempts = [*plan.targets, *plan.spares]
+        else:
+            attempts = [plan.targets[index % len(plan.targets)] for index in range(request.count)]
+
+        for index, concept in enumerate(attempts):
+            if len(questions) >= request.count:
+                break
             question_id = self._question_id(batch_id, concept, request, plan, index)
             approved = loaded.existing.get(question_id)
             if (
@@ -545,12 +577,7 @@ class QuestionGenerationService:
         accepted = len(questions)
         if accepted == 0:
             status = GenerationStatus.FAILED
-        elif (
-            accepted < request.count
-            or counts.rejected
-            or counts.failed
-            or counts.validation_incomplete
-        ):
+        elif accepted < request.count or counts.failed or counts.validation_incomplete:
             status = GenerationStatus.PARTIAL
         else:
             status = GenerationStatus.OK
@@ -1123,6 +1150,32 @@ class QuestionGenerationService:
             deduped.append(concept)
         if not deduped:
             raise GenerationError("no_concepts", "no target concept could be resolved")
+
+        # A multi-question batch must not ask the same prompt with a different index.
+        # Keep the chosen concept(s) first, then continue through their units and the
+        # rest of the syllabus in deterministic order when the caller asked for more.
+        spares: tuple[_Concept, ...] = ()
+        if request.expand_batch:
+            seen = {item.concept_id for item in deduped}
+            selected_units = list(dict.fromkeys(item.unit_id for item in deduped))
+            unit_order = [
+                *selected_units,
+                *[unit.unit_id for unit in loaded.units if unit.unit_id not in selected_units],
+            ]
+            extras: list[_Concept] = []
+            for unit_id in unit_order:
+                for concept_id in loaded.unit_concepts.get(unit_id, []):
+                    if concept_id in seen:
+                        continue
+                    spare = loaded.by_id.get(concept_id)
+                    if spare is None:
+                        continue
+                    seen.add(concept_id)
+                    extras.append(spare)
+            needed = max(0, request.count - len(deduped))
+            deduped.extend(extras[:needed])
+            spares = tuple(extras[needed : needed + max(3, request.count)])
+
         return _Plan(
             bloom=bloom,
             difficulty=difficulty,
@@ -1130,6 +1183,7 @@ class QuestionGenerationService:
             targets=tuple(deduped),
             reference_style=style,
             defaults_applied=defaults,
+            spares=spares,
         )
 
     def _reference_style(
@@ -1299,7 +1353,9 @@ class QuestionGenerationService:
                 terms.append(word)
         verb = OBJECTIVE_VERBS[plan.bloom]
         objective = f"{verb} {concept.label} in {concept.unit_label}"
-        if concept.unit_title:
+        if concept.unit_title and normalize_term(concept.unit_title) != normalize_term(
+            concept.unit_label
+        ):
             objective += f" ({concept.unit_title})"
         return GenerationPrompt(
             course_id=loaded.course.course_id,
@@ -1351,6 +1407,11 @@ class QuestionGenerationService:
                 # describe it; it cannot ground a question.
                 continue
             matches.append((0 if exact else 1, sentence.priority, len(excerpt), excerpt, sentence))
+        # When the corpus contains sentences that name the concept, loose word
+        # matches from unrelated parts of the document are not useful evidence.
+        exact_matches = [item for item in matches if item[0] == 0]
+        if exact_matches:
+            matches = exact_matches
         matches.sort(key=lambda item: item[:4])
         passages = [
             SourcePassage(
@@ -1438,6 +1499,9 @@ class QuestionGenerationService:
                 "requested_marks": plan.marks,
                 "include_answer_key": request.include_answer_key,
                 "include_explanation": request.include_explanation,
+                "difficulty_explicit": request.difficulty is not None,
+                "bloom_explicit": request.bloom is not None,
+                "expand_batch": request.expand_batch,
                 "type_method": TYPE_METHOD,
                 "bloom_method": BLOOM_METHOD,
                 "difficulty_method": DIFFICULTY_METHOD,
@@ -1749,6 +1813,11 @@ class QuestionGenerationService:
             question.review_history.append(ReviewEvent(status=status, note=note, reviewer=reviewer))
             question.updated_at = utcnow()
             repo.save_question(question, allow_overwrite_approved=True)
+            # The repository increments the stored revision; returning the
+            # pre-update model would make the next optimistic save conflict.
+            stored = repo.get_question(question_id)
+            if stored is not None:
+                return stored
         return question
 
     def review_batch(

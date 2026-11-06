@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <meta
+      name="description"
+      content="Local educational-intelligence workspace for ingested syllabi, question papers, examination datasets, knowledge graphs and grounded practice."
+    />
+    <title>Exam Engine · Learning Intelligence</title>
+    <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/assets/styles.css" />
+    <link rel="stylesheet" href="/assets/styles-v2.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <aside class="sidebar" id="sidebar" aria-label="Primary workspace navigation">
+      <div class="sidebar-head">
+        <a class="brand" href="#/dashboard" aria-label="Exam Engine dashboard">
+          <span class="brand-mark" aria-hidden="true">
+            <span></span><span></span><span></span>
+          </span>
+          <span class="brand-copy">
+            <strong>Exam Engine</strong>
+            <small>Intelligence workspace</small>
+          </span>
+        </a>
+        <button
+          class="rail-toggle"
+          type="button"
+          id="sidebar-collapse"
+          aria-label="Collapse navigation"
+          aria-pressed="false"
+          title="Collapse navigation"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M15 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path>
+          </svg>
+        </button>
+      </div>
+
+      <nav aria-label="Workspace" id="primary-nav" class="sidebar-nav"></nav>
+
+      <div class="sidebar-bottom">
+        <div class="sidebar-status">
+          <span class="status-indicator" aria-hidden="true"></span>
+          <div>
+            <strong>Local corpus</strong>
+            <span id="db-name">connecting to database…</span>
+          </div>
+        </div>
+        <footer class="sidebar-footer">
+          <span id="build-info">Local-first workspace</span>
+          <span>No remote data</span>
+        </footer>
+      </div>
+    </aside>
+
+    <div class="app-body">
+      <header class="topbar">
+        <div class="topbar-left">
+          <button
+            class="icon-button sidebar-toggle"
+            type="button"
+            id="sidebar-toggle"
+            aria-controls="sidebar"
+            aria-expanded="false"
+            aria-label="Open navigation"
+          >
+            <span class="bars" aria-hidden="true"></span>
+          </button>
+          <nav class="breadcrumbs" id="breadcrumbs" aria-label="Breadcrumb"></nav>
+        </div>
+
+        <div class="topbar-tools">
+          <button
+            class="command-trigger"
+            type="button"
+            id="command-trigger"
+            aria-haspopup="dialog"
+            aria-controls="command-dialog"
+            aria-label="Search workspaces and courses"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="1.8"></circle>
+              <path d="M16.2 16.2L21 21" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path>
+            </svg>
+            <span class="command-trigger-label">Jump to</span>
+            <kbd id="command-shortcut">Ctrl K</kbd>
+          </button>
+
+          <label class="course-select">
+            <span class="course-select-label">Subject</span>
+            <select id="course-select" aria-label="Selected subject"></select>
+          </label>
+
+          <button class="theme-toggle" type="button" id="theme-toggle" aria-label="Switch theme">
+            <span class="theme-glyph" aria-hidden="true">
+              <svg class="theme-icon theme-icon-sun" viewBox="0 0 24 24" focusable="false">
+                <circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="1.7"></circle>
+                <path d="M12 2v2.2M12 19.8V22M2 12h2.2M19.8 12H22M4.9 4.9l1.6 1.6M17.5 17.5l1.6 1.6M19.1 4.9l-1.6 1.6M6.5 17.5l-1.6 1.6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"></path>
+              </svg>
+              <svg class="theme-icon theme-icon-moon" viewBox="0 0 24 24" focusable="false">
+                <path d="M20 15.3A8.5 8.5 0 0 1 8.7 4a8.5 8.5 0 1 0 11.3 11.3z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></path>
+              </svg>
+            </span>
+            <span id="theme-label">Theme</span>
+          </button>
+        </div>
+      </header>
+
+      <main id="main" tabindex="-1">
+        <div id="view" class="view" aria-live="polite">
+          <div class="boot-panel" role="status">
+            <p class="eyebrow">Loading workspace</p>
+            <h1>Opening the local intelligence database…</h1>
+            <div class="skeleton-stack" aria-hidden="true">
+              <span></span><span></span><span></span>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <div class="sidebar-scrim" id="sidebar-scrim" hidden></div>
+
+    <dialog class="command-dialog" id="command-dialog" aria-labelledby="command-title">
+      <div class="command-shell">
+        <h2 class="visually-hidden" id="command-title">Jump to a workspace or subject</h2>
+        <div class="command-search">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="1.8"></circle>
+            <path d="M16.2 16.2L21 21" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path>
+          </svg>
+          <input
+            id="command-input"
+            type="search"
+            placeholder="Find a workspace, report or subject"
+            aria-label="Search workspaces and subjects"
+            aria-controls="command-results"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <button class="command-close" type="button" id="command-close" aria-label="Close search">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path>
+            </svg>
+          </button>
+        </div>
+        <div class="command-results" id="command-results" role="listbox" aria-label="Search results"></div>
+        <div class="command-footer" aria-hidden="true">
+          <span><kbd>↑</kbd><kbd>↓</kbd> navigate</span>
+          <span><kbd>Enter</kbd> open</span>
+          <span><kbd>Esc</kbd> close</span>
+        </div>
+      </div>
+    </dialog>
+
+    <div class="toast-region" id="toast-region" role="status" aria-live="polite"></div>
+    <noscript>
+      <div class="noscript">This workspace needs JavaScript. It runs entirely locally and
+        makes no third-party requests.</div>
+    </noscript>
+    <script type="module" src="/assets/app.js"></script>
+  </body>
+</html>

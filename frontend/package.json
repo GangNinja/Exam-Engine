@@ -1,0 +1,18 @@
+{
+  "name": "exam-engine-dashboard-assets",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Static assets and vendoring tooling for the Exam Engine dashboard. No frontend build step is required at runtime.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "sync:hairline": "node scripts/sync-hairline.mjs",
+    "check:assets": "node scripts/check-assets.mjs",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@lucasmarkes/hairline": "0.5.1"
+  }
+}

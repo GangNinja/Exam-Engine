@@ -346,6 +346,13 @@ def _rephrase_text(source: SourceQuestion, index: int) -> str:
             f"A tutor asks: {text}",
             f"Restate the task in your own words, then answer it. {text}",
         )
+        if "in your own words" in text.casefold():
+            # A rephrase must not repeat a phrase the source question already uses;
+            # every remaining variant embeds the text without that framing.
+            variants = (
+                f"Answer precisely and show your reasoning. {text}",
+                f"A tutor asks: {text}",
+            )
     return variants[index % len(variants)]
 
 

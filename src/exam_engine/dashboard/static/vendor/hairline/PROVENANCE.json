@@ -1,0 +1,12 @@
+{
+  "package": "@lucasmarkes/hairline",
+  "version": "0.5.1",
+  "license": "MIT",
+  "source": "https://github.com/lucasmarkes/hairline",
+  "documentation": "https://hairline.lucasmarkes.com/",
+  "entry": "dist/index.js",
+  "sha256": "16fdfec136dc99cf3f65730989364797f0bbb228b7bca60c4d422e0e12ce3b7d",
+  "vendored_by": "frontend/scripts/sync-hairline.mjs",
+  "runtime_network_access": false,
+  "note": "Illustrations are decorative and never represent application data."
+}

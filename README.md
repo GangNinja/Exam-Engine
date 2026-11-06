@@ -1,12 +1,13 @@
-# Intelligent Exam Knowledge & Assessment Engine — Phases 1–11
+# Intelligent Exam Knowledge & Assessment Engine — Phases 1–13
 
 Multi-course ingestion, NLP analysis, question understanding, question-paper
 analytics, a persistent question knowledge graph, prerequisite discovery with
 explainable learning paths, evidence-backed coverage-gap detection, historical
 Exam DNA question-setting patterns, a review-only concept evolution
-tracker, grounded, review-first automatic question generation, and advanced
+tracker, grounded, review-first automatic question generation, advanced
 assessment intelligence — question mutation, adversarial questions and
-evidence-bounded misconception mining — for the exam-knowledge platform.
+evidence-bounded misconception mining — and first-class integration of personal
+GATE, CBSE, JEE and NEET examination datasets for the exam-knowledge platform.
 
 Phase 1 turns messy course material — question papers, syllabi, notes and question
 banks — into validated, provenance-tracked, course-scoped records. Phase 2 derives
@@ -51,13 +52,35 @@ stored anonymised answers against the reference material for the question and re
 candidate patterns with their evidence, support level, confidence and limitations —
 discarding answers it cannot read instead of calling them misconceptions.
 
-**Status:** Phases 1–11 complete. No later-phase intelligence (dashboard integration,
-answer grading, forecasting) is implemented here, and no generated item or mined
-pattern is ever approved automatically.
+Phase 12 adds the application layer: a loopback-only dashboard that reads and
+writes through the Phase 1–11 services, a framework-free browser workspace with
+real SVG charts, vendored MIT Hairline illustrations, an original animated tutor
+that explains only stored course evidence, bounded background jobs for the
+long-running analyses, batch expansion across distinct concepts, local answer
+checks for stored practice questions, and explicit unavailable states for
+capabilities that do not exist (conversational reasoning and forecasting).
+
+Phase 13 adds first-class personal examination datasets. It discovers the real
+GATE, CBSE Class 10/12, JEE Advanced, JEE Mains and NEET corpus without changing
+the source folders; audits every CSV row and syllabus PDF; imports each CSV as a
+`question_bank` document and each syllabus as a `syllabus` document; preserves
+source ids, wording, options, subparts and answer text; and projects the corpus
+into course-isolated paper, question, answer and syllabus records. The dashboard
+`Exam datasets` workspace and `/api/exams` read models expose real counts,
+filters, quality signals and import history. Missing answers, options, marks or
+years remain explicitly missing; nothing is fabricated or merged across exams.
+
+**Status:** Phases 1–13 complete for the documented software and corpus checks.
+Practice answer checks are local lexical/rubric feedback, not an examination
+grade; forecasting and autonomous approval are not implemented, and no generated
+item or mined pattern is ever approved automatically. The dashboard is a local
+single-user tool with no authentication.
+See [docs/phase-13-personal-datasets.md](docs/phase-13-personal-datasets.md) for
+the corpus inventory, audit results, downstream totals and verification record.
 
 ---
 
-## What Phases 1–11 deliver
+## What Phases 1–13 deliver
 
 | Capability | Where |
 |---|---|
@@ -104,6 +127,7 @@ pattern is ever approved automatically.
 | Named structural, alignment, answerability, MCQ, clarity and cognitive validation checks | [`validation.py`](src/exam_engine/generation/validation.py) |
 | Duplicate/variant detection reusing Phase 3 similarity, over generated and historical questions | [`dedupe.py`](src/exam_engine/generation/dedupe.py) |
 | Grounded generation, provenance-bearing assembly, review state and batch reports | [`service.py`](src/exam_engine/generation/service.py), [`models/generation.py`](src/exam_engine/models/generation.py) |
+| Multi-question expansion across distinct syllabus concepts and local MCQ/free-text answer checks | [`service.py`](src/exam_engine/generation/service.py), [`grading.py`](src/exam_engine/generation/grading.py) |
 | Batch and question persistence with review history and revision-safe writes | [`0007_generated_questions.sql`](src/exam_engine/storage/migrations/0007_generated_questions.sql), [`generation_repository.py`](src/exam_engine/storage/generation_repository.py) |
 | Generation generate/formats/list/show/batches/failures/review/review-batch/export/review-summary CLI | [`cli_generation.py`](src/exam_engine/cli_generation.py) |
 | Mutation strategy registry with declared invariants and deterministic variant builders | [`mutation.py`](src/exam_engine/advanced/mutation.py), [`source.py`](src/exam_engine/advanced/source.py) |
@@ -113,6 +137,16 @@ pattern is ever approved automatically.
 | Reused scope/evidence/similarity context (new public `ScopeContext`) | [`service.py`](src/exam_engine/generation/service.py), [`service.py`](src/exam_engine/advanced/service.py) |
 | Response and misconception persistence with review-history preservation | [`0008_advanced_assessment.sql`](src/exam_engine/storage/migrations/0008_advanced_assessment.sql), [`0009_response_identified.sql`](src/exam_engine/storage/migrations/0009_response_identified.sql), [`advanced_repository.py`](src/exam_engine/storage/advanced_repository.py) |
 | Advanced mutate/adversarial/variants/show/review, responses and misconceptions CLI | [`cli_advanced.py`](src/exam_engine/cli_advanced.py) |
+| Loopback dashboard server, stable JSON API, background jobs and static asset host | [`dashboard/`](src/exam_engine/dashboard), [`cli_dashboard.py`](src/exam_engine/cli_dashboard.py) |
+| Framework-free workspace: overview, course, analysis, learning, practice, tutor, including Phase 11 mutation and adversarial generation | [`dashboard/static/`](src/exam_engine/dashboard/static) |
+| Course-scoped extractive tutor with citations and explicit capability boundaries | [`tutor.py`](src/exam_engine/dashboard/tutor.py) |
+| Original animated SVG tutor avatar (six states, text captions, reduced motion) | [`tutor-avatar.js`](src/exam_engine/dashboard/static/tutor-avatar.js) |
+| Vendored Hairline 0.5.1 (MIT, exact pin, provenance and lazy loading) | [`vendor/hairline/`](src/exam_engine/dashboard/static/vendor/hairline) |
+| Dataset discovery, syllabus matching, duplicate-safe audit and inventory reports | [`src/exam_engine/datasets/`](src/exam_engine/datasets), [`reports/phase13/`](reports/phase13) |
+| Schema-preserving CSV/PDF import and course-isolated exam projections | [`catalog.py`](src/exam_engine/datasets/catalog.py), [`parsing.py`](src/exam_engine/datasets/parsing.py), [`service.py`](src/exam_engine/datasets/service.py) |
+| Phase 13 paper/question/answer/detail tables and import-run audit trail | [`0010_exam_datasets.sql`](src/exam_engine/storage/migrations/0010_exam_datasets.sql), [`exam_repository.py`](src/exam_engine/storage/exam_repository.py) |
+| Real-data exam read models, filters, quality counts and dashboard API | [`queries.py`](src/exam_engine/datasets/queries.py), [`api.py`](src/exam_engine/dashboard/api.py), [`exams.js`](src/exam_engine/dashboard/static/views/exams.js) |
+| Phase 13 discover/audit/import/status/papers/questions/syllabus CLI | [`cli_exams.py`](src/exam_engine/cli_exams.py) |
 
 ## Quickstart
 
@@ -172,6 +206,13 @@ python -m exam_engine advanced misconceptions analyse --course demo-cs201-2024-v
 python -m exam_engine advanced misconceptions list --course demo-cs201-2024-v1 --status candidate
 python -m exam_engine advanced misconceptions export --course demo-cs201-2024-v1 \
     --syllabus syl_… --out reports/misconceptions.json
+python -m exam_engine dashboard                       # Phase 12: open the workspace
+python -m exam_engine exams discover                  # Phase 13: inspect the local corpus
+python -m exam_engine exams audit                     # writes reports/phase13 inventory and validation CSVs
+python -m exam_engine exams import                    # imports CSVs and syllabus PDFs into this database
+python -m exam_engine exams status
+python -m exam_engine exams papers --course gate-chemistry
+python -m exam_engine exams questions --course gate-chemistry --limit 5
 ```
 
 The separate multi-session analytics fixture demonstrates period trends without
@@ -192,6 +233,28 @@ python -m exam_engine exam-dna profile --course demo-analytics-cs201-2024-v1
 
 Database path defaults to `data/exam_engine.db`; override with `--db PATH` or
 `EXAM_ENGINE_DB`.
+
+### Dashboard workspace
+
+```bash
+python -m exam_engine dashboard               # http://127.0.0.1:8765
+python -m exam_engine dashboard --port 0      # choose a free port
+python -m exam_engine --db data/teaching.db dashboard
+```
+
+The dashboard is a local, single-user workspace over the same database and
+service layer as the CLI. It has no accounts, no TLS and no telemetry; it binds
+to loopback only unless `--allow-remote` is passed deliberately. Ingest and
+analyse courses with the CLI (or the Course workspace), then open Overview,
+Analysis, Learning, Practice and Tutor. Practice exposes Phase 10 generation and
+Phase 11 mutation/adversarial generation against the real stored corpus; every
+item enters the same human review queue as a Draft. Multi-question requests can
+continue across other in-scope concepts, and stored cards offer a local "Check
+your answer" study aid. Long analyses run as background jobs and
+are polled by the UI; optional illustrations and the avatar are lazy-loaded and
+never block the underlying feature. See
+[docs/phase-12-dashboard-and-tutor.md](docs/phase-12-dashboard-and-tutor.md) for
+the API surface, licence decisions and measured results.
 
 ### Ingesting your own material
 
@@ -296,7 +359,7 @@ src/exam_engine/
     similarity.py        candidate retrieval and four similarity kinds
     service.py           per-course orchestration and run reports
   storage/
-    migrations/*.sql     checksum-verified schema (0003 = Phase 2, 0004 = Phase 3, 0005–0006 = Phase 5, 0007 = Phase 10, 0008–0009 = Phase 11)
+    migrations/*.sql     checksum-verified schema (0003 = Phase 2, 0004 = Phase 3, 0005–0006 = Phase 5, 0007 = Phase 10, 0008–0009 = Phase 11, 0010 = Phase 13)
     schema.py            ORM rows mirroring the migrations
     repositories.py      the only SQL surface (ingest)
     nlp_repositories.py  the only SQL surface (derived NLP data)
@@ -335,7 +398,8 @@ src/exam_engine/
     providers.py        provider protocol, offline template provider, opt-in model provider
     validation.py       named structural/alignment/answerability/MCQ/clarity/cognitive checks
     dedupe.py           duplicate decisions over generated and historical questions (Phase 3 reuse)
-    service.py          scope, evidence, provider call, assembly, validation, persistence, review
+    service.py          scope, expansion, evidence, provider call, assembly, validation, persistence, review
+    grading.py          local multiple-choice and lexical free-text checks for stored questions
   cli_generation.py      generation generate/formats/list/show/batches/failures/review/review-batch/export/review-summary
   advanced/
     source.py           error type, source-question and evidence-context views
@@ -346,10 +410,18 @@ src/exam_engine/
     service.py          scope, assembly, dedupe, persistence, mining and review
   cli_advanced.py        advanced capabilities/mutate/adversarial/variants/show/review,
                          advanced responses …, advanced misconceptions …
+  dashboard/
+    api.py              HTTP adapter over the existing services (no re-implemented analysis)
+    errors.py           domain error -> stable JSON envelope
+    jobs.py             bounded in-process jobs with per-course de-duplication
+    server.py           loopback HTTP server, static assets, CSP and same-origin checks
+    tutor.py            course-scoped extractive tutor and capability report
+    static/             framework-free HTML/CSS/ES modules (no runtime build step)
+  cli_dashboard.py      dashboard command with a loopback guard
 tools/build_sample_dataset.py   regenerates the synthetic sample dataset
 datasets/sample/                committed synthetic sample + manifest
 datasets/analytics_sample/      synthetic three-session fixture for Phase 4/tests
-tests/                          602 tests across models, adapters, segmentation, storage, pipeline, NLP, understanding, analytics, graph, prerequisites, coverage, Exam DNA, concept evolution, question generation, advanced assessment, CLI, artefacts
+tests/                          620 tests across models, adapters, segmentation, storage, pipeline, NLP, understanding, analytics, graph, prerequisites, coverage, Exam DNA, concept evolution, question generation, advanced assessment, CLI, artefacts and the dashboard API
 ```
 
 Deeper design notes: [docs/phase-1-ingestion.md](docs/phase-1-ingestion.md),
@@ -361,8 +433,9 @@ Deeper design notes: [docs/phase-1-ingestion.md](docs/phase-1-ingestion.md),
 [docs/phase-7-coverage.md](docs/phase-7-coverage.md),
 [docs/phase-8-exam-dna.md](docs/phase-8-exam-dna.md),
 [docs/phase-9-concept-evolution.md](docs/phase-9-concept-evolution.md),
-[docs/phase-10-question-generation.md](docs/phase-10-question-generation.md) and
-[docs/phase-11-advanced-assessment.md](docs/phase-11-advanced-assessment.md).
+[docs/phase-10-question-generation.md](docs/phase-10-question-generation.md),
+[docs/phase-11-advanced-assessment.md](docs/phase-11-advanced-assessment.md) and
+[docs/phase-12-dashboard-and-tutor.md](docs/phase-12-dashboard-and-tutor.md).
 Dataset/licensing workflow: [docs/datasets.md](docs/datasets.md).
 
 ## Configuration
@@ -484,12 +557,18 @@ remaining candidate/top-k settings.
 ## Tests and checks
 
 ```bash
-python -m pytest                                     # 602 tests
+python -m pytest                                     # 620 tests
 python -m pytest --cov=exam_engine --cov-report=term-missing
 python -m ruff check src tests tools
 python -m ruff format --check src tests tools
 python -m mypy
+cd frontend && npm ci && npm run check:assets && npm test   # 16 Node tests
 ```
+
+The dashboard has no frontend build step. `npm run check:assets` verifies every
+local module/reference and the exact Hairline pin, licence and vendored bytes;
+`npm test` runs the pure state, chart, API-client, avatar and static-asset tests
+on Node's built-in runner.
 
 Tests use synthetic fixtures for plumbing (generated PDFs, DOCX, scanned PDFs,
 CSV/JSON banks) plus the committed synthetic sample. They prove ingestion,
@@ -529,7 +608,12 @@ observation versus recurring misconception evidence, duplicate imports, related-
 concept confusion, partial credit, missing reference answers and concept mappings,
 anonymised identifiers, independence warnings for unidentified responses, provenance,
 repeatable analysis, review-decision persistence, course and syllabus isolation and
-CLI JSON/error paths.
+CLI JSON/error paths. Phase 12 adds dashboard API contract and error-envelope
+tests, real analysis/fixture reads, the generation-scope integration,
+concept-expanding batches with distinct prompts, exact MCQ and lexical free-text
+answer checks, Draft/approval review behaviour, tutor grounding and refusal,
+background jobs, upload validation and cross-course rejection, HTTP/CSP/asset
+behaviour and foreign-origin rejection.
 They do **not** establish that keyphrases, types, Bloom levels,
 difficulty, mappings, coverage findings, inferred concept changes or generated
 questions are educationally correct; no labelled benchmark is bundled, and segmentation
@@ -707,7 +791,7 @@ heuristics are deliberately conservative rather than benchmark-optimal.
   relationship that no longer exists.
 * No labelled concept-evolution benchmark is bundled. Synthetic fixtures validate
   software behavior only, not whether terms are truly synonymous or a change is
-  educationally meaningful. Phase 13 personal material remains out of scope.
+  educationally meaningful.
 * Phase 10 questions are proposed practice material. They start in
   `pending_review`, carry their evidence and validation findings, and are never a
   claim of educational correctness or a prediction of real examination content.
@@ -727,6 +811,14 @@ heuristics are deliberately conservative rather than benchmark-optimal.
   outcome for judgement-dependent findings and low-confidence Phase 3 labels, and
   no labelled benchmark of generated-question quality, difficulty calibration or
   Bloom correctness is bundled.
+* `expand_batch` fills a multi-question request by continuing through other
+  concepts in the selected syllabus, not by repeating one prompt. It cannot
+  manufacture breadth when the syllabus has too few grounded concepts; the batch
+  reports the shortfall instead of padding it.
+* Existing stored questions are not rewritten when generation templates or
+  answer handling change. Regenerate a batch to receive current wording, answer
+  status and expected-answer outline; stored rows keep the content they were
+  saved with.
 * Phase 11 mutation is textual and deterministic: rephrasing reframes the original
   task, scenario mutation adds a setting, and neither rewrites the content. Variants
   that change the answer (`numerical`, `difficulty`, `cognitive`, `related_concept`,
@@ -749,29 +841,67 @@ heuristics are deliberately conservative rather than benchmark-optimal.
   are discarded with a reason. Support counts depend on the response identifiers
   supplied, so they are described as response counts, never as class-wide rates, and
   no record makes a claim about a student's ability.
+* The Phase 12 dashboard is a local single-user tool. It has no accounts, no
+  per-user separation and no TLS; it binds to loopback unless `--allow-remote` is
+  passed deliberately. Do not treat its presence as an authorization claim.
+* Dashboard jobs are in-process and ephemeral: a restart clears job history, not
+  the data the job wrote. There is no durable queue, cancellation or progress
+  percentage. Long analyses still take as long as the underlying service.
+* The tutor is extractive retrieval over stored rows, not a language model. It
+  cannot answer outside the analysed corpus, ambiguous questions return concept
+  suggestions instead of a guess, and answer quality inherits Phase 2/3/5 identity
+  and mapping quality.
+* Practice answer checking is local and lexical. Multiple-choice answers are
+  compared with the stored key; free text is scored by coverage of the stored
+  reference and syllabus-topic terms, so a correct paraphrase can be
+  under-credited and a keyword-heavy answer over-credited. It is formative
+  feedback, not a mark, and only stored generated questions can be checked.
+  Attempts are not persisted. Open conversational reasoning and forecasting
+  remain unavailable. The avatar and Hairline never compute or modify an
+  assessment; avatar state is presentation only.
+* Browser verification for Phase 12 was manual Chromium testing, not an automated
+  E2E suite. Accessibility was checked structurally (skip link, focus, labels,
+  reduced motion) but not by a formal WCAG audit or screen-reader matrix.
+* Phase 13 imports the user's local GATE, CBSE, JEE and NEET corpus in place. It
+  does not establish educational correctness, examiner intent or student ability;
+  it establishes source traceability and software behavior on those records.
+* Of 15,432 questions, 6,123 have no stored answer, 4,907 MCQ/MSQ/assertion items
+  have no explicit options, 10,636 have no stated marks, and 173 have no recognised
+  question type. These are kept as missing values and reported, never filled in.
+  The audit also records 467 answers whose option key could not be identified and
+  21 rows with replacement characters; those records remain traceable.
+* Years are parsed only from `question_id`; a missing year stays missing. Paper
+  groups are source-id prefixes, not an inferred examination calendar. Repeated
+  questions in different years remain separate occurrences; import deduplication
+  skips identical source records, never merges distinct years.
+* Exam DNA and evolution use read-only virtual paper adapters over the imported
+  question bank. A year-level date is an ordering proxy, marked low-confidence, and
+  is given only to virtual derived papers. It is not a real examination date, and
+  no historical trend is a forecast.
+* Generation and advanced-assessment checks were exercised on representative
+  courses from every category, not on all 29 courses. Their output remains
+  review-only and inherits the source question's missing-answer and mapping limits.
+* Browser verification for Phase 13 covers the dataset workspace filters and API
+  counts in Chromium; it is not an automated browser suite or a WCAG audit.
 
 ## Roadmap position
 
-Phases 1–11 are implemented: ingestion, text analysis, question understanding,
+Phases 1–13 are implemented: ingestion, text analysis, question understanding,
 read-only question-paper analytics, a persistent evidence-bearing knowledge graph,
 prerequisite discovery with explainable learning paths, an evidence-backed
 coverage-gap detector, a historical Exam DNA pattern profile, a read-only concept
 evolution tracker, grounded automatic question generation with named validation
-checks, deduplication and human review, and advanced assessment intelligence:
-question mutation with declared invariants, fair adversarial questions with rubrics,
-and evidence-bounded misconception mining with review. The design stays extensible
-for the remaining phases: adapters, OCR, embedding/entity providers, classifiers and
-graph storage backends are replaceable; segmentation and topic models are pure
-functions of their inputs; provenance and per-record uncertainty are first-class; and
-course isolation is enforced at the schema level. Later phases consume questions,
-Phase 2 NLP rows, the Phase 3 `question_analysis`, mapping, type, Bloom, difficulty
-and similarity tables, Phase 4 reports, Phase 5–6 graph nodes/edges, Phase 7 coverage
+checks, deduplication and human review, advanced assessment intelligence (question
+mutation with declared invariants, fair adversarial questions with rubrics, and
+evidence-bounded misconception mining with review), the integrated local workspace,
+and validated personal GATE/CBSE/JEE/NEET dataset integration. The design stays
+extensible: adapters, OCR, embedding/entity providers, classifiers and graph
+storage backends are replaceable; segmentation and topic models are pure functions
+of their inputs; provenance and per-record uncertainty are first-class; and course
+isolation is enforced at the schema level. Later phases consume questions, Phase 2
+NLP rows, the Phase 3 `question_analysis`, mapping, type, Bloom, difficulty and
+similarity tables, Phase 4 reports, Phase 5–6 graph nodes/edges, Phase 7 coverage
 reports, Phase 8 Exam DNA profiles, Phase 9 evolution reports, Phase 10 generated
-questions and Phase 11 variants, challenge items and misconception records instead of
-re-parsing raw files. The next recommended phase is Phase 12 (full integration,
-dashboard and final evaluation); Phase 11 does not implement answer grading,
-forecasting, automatic approval or dashboard integration.
-
-**Phase 13 — Personal Data Integration & Validation** will reuse the same manifest,
-provenance and pipeline path with `dataset_type=permissioned`; no personal material
-is bundled or assumed here.
+questions, Phase 11 variants/challenge items/misconception records, and Phase 13
+exam projections instead of re-parsing raw files. No phase implements answer
+grading, forecasting, autonomous approval or authentication.

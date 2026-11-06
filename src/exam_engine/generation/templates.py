@@ -100,15 +100,16 @@ def _build() -> dict[tuple[GenerationFormat, BloomLevel], Template]:
             "short_define",
             GenerationFormat.SHORT_ANSWER,
             BloomLevel.REMEMBER,
-            "According to the course material for {unit}, define {concept} in one "
-            "or two sentences.",
+            "Using the course material for {unit}, define the following topic in one "
+            "or two sentences: {concept}.",
             answer_mode="excerpt",
         ),
         _template(
             "short_explain",
             GenerationFormat.SHORT_ANSWER,
             BloomLevel.UNDERSTAND,
-            "Explain {concept} in your own words, as it is presented in {unit}.",
+            "Explain the following topic in your own words, using the treatment in "
+            "{unit}: {concept}.",
             answer_mode="excerpt",
         ),
         # -- explanation ----------------------------------------------------
@@ -116,15 +117,16 @@ def _build() -> dict[tuple[GenerationFormat, BloomLevel], Template]:
             "explain_state",
             GenerationFormat.EXPLANATION,
             BloomLevel.REMEMBER,
-            "State what {concept} is, using the definition given in {unit}.",
+            "Using the definition given in {unit}, state what the following topic "
+            "means: {concept}.",
             answer_mode="excerpt",
         ),
         _template(
             "explain_own_words",
             GenerationFormat.EXPLANATION,
             BloomLevel.UNDERSTAND,
-            "Explain {concept} and why it matters in {unit}. Use your own words and "
-            "refer to the course material where it helps.",
+            "Explain the following topic and why it matters in {unit}: {concept}. "
+            "Use your own words and refer to the course material where it helps.",
             answer_mode="excerpt",
         ),
         _template(
@@ -161,8 +163,8 @@ def _build() -> dict[tuple[GenerationFormat, BloomLevel], Template]:
             "long_discuss",
             GenerationFormat.LONG_ANSWER,
             BloomLevel.UNDERSTAND,
-            "Write a structured answer explaining {concept} and its place in {unit}. "
-            "Use the course terminology correctly.",
+            "Write a structured answer on the following topic and its place in {unit}: "
+            "{concept}. Use the course terminology correctly.",
             answer_mode="excerpt",
         ),
         _template(

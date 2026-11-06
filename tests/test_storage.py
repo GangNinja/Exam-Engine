@@ -74,6 +74,7 @@ def test_migrations_are_idempotent(database) -> None:
         "0007_generated_questions.sql",
         "0008_advanced_assessment.sql",
         "0009_response_identified.sql",
+        "0010_exam_datasets.sql",
     ]
     assert migrate(database.engine) == []
     assert "0003_nlp_foundation.sql" in applied_migrations(database.engine)
@@ -113,6 +114,7 @@ def test_upgrade_from_initial_schema_adds_question_unit(tmp_path: Path) -> None:
         "0007_generated_questions.sql",
         "0008_advanced_assessment.sql",
         "0009_response_identified.sql",
+        "0010_exam_datasets.sql",
     ]
     with engine.connect() as conn:
         columns = [row[1] for row in conn.exec_driver_sql("PRAGMA table_info(questions)")]

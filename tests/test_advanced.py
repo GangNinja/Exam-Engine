@@ -361,6 +361,26 @@ def test_rephrase_keeps_task_and_answer_but_changes_wording(database: Database) 
     assert mutation.INVARIANT_ANSWER in candidate.invariants
 
 
+def test_rephrase_does_not_repeat_personalisation_already_in_the_source(
+    database: Database,
+) -> None:
+    _seed(database)
+    source = dataclasses.replace(
+        _source_for(database),
+        text="Explain stacks in your own words and give one example from the notes.",
+    )
+    for index in range(4):
+        candidate = mutation.mutate(
+            source,
+            MutationStrategy.REPHRASE,
+            index=index,
+            seed=0,
+            context=_context(),
+        )
+        assert candidate.text != source.text
+        assert candidate.text.casefold().count("in your own words") == 1
+
+
 def test_scenario_mutation_preserves_objective_and_concepts(database: Database) -> None:
     _seed(database)
     source = _source_for(database)

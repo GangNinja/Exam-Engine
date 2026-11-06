@@ -6,9 +6,28 @@
 * `analytics_sample/` — a **synthetic** three-session course used to demonstrate
   Phase 4 repetition, marks and observed-period trends. Its exam metadata is
   fabricated for testing and must not be presented as university history.
+* `GATE/`, `BOARD EXAMS/`, `JEE Advanced/`, `JEE Mains/`, `NEET/` — the user's
+  personal examination corpus, retained in its original hierarchy. Phase 13 reads
+  these files in place. It never renames, moves, overwrites or deletes them.
 * `templates/manifest.example.json` — copy this to start a new dataset import.
 
-Import the sample:
+Audit and import the personal corpus (the source files are not modified):
+
+```bash
+python -m exam_engine exams discover
+python -m exam_engine exams audit --out reports/phase13
+python -m exam_engine exams import --out reports/phase13
+python -m exam_engine exams status
+python -m exam_engine dashboard   # open Exam datasets
+```
+
+Each CSV becomes a `question_bank` document and each matched syllabus PDF becomes
+a `syllabus` document, scoped to that category and subject. The generated audit
+files are `dataset_inventory.csv`, `dataset_validation_report.csv` and
+`dataset_summary.json` under `reports/phase13/`. Do not commit the corpus unless
+its licence permits redistribution; keep the source folders untouched.
+
+Import the synthetic sample:
 
 ```bash
 python -m exam_engine init-db
@@ -38,8 +57,10 @@ coverage findings and exam sessions are fixture data, not verified educational
 facts or real examination history.
 
 Read [docs/datasets.md](../docs/datasets.md) before adding external material: it
-covers provenance fields, licensing rules, versioning a course, and the Phase 13
-boundary for personal data.
+covers provenance fields, licensing rules, versioning a course, and the implemented
+Phase 13 personal-data boundary. Read
+[docs/phase-13-personal-datasets.md](../docs/phase-13-personal-datasets.md) for the
+actual corpus inventory, audit results and downstream verification.
 
 Do not commit downloaded papers unless their licence clearly permits
 redistribution.

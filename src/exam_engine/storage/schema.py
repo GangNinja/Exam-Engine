@@ -870,6 +870,127 @@ class StudentResponseRow(Base):
     )
 
 
+class ExamPaperRow(Base):
+    __tablename__ = "exam_papers"
+
+    paper_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    course_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("courses.course_id", ondelete="CASCADE"), nullable=False
+    )
+    document_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("documents.document_id", ondelete="CASCADE"), nullable=False
+    )
+    category_id: Mapped[str] = mapped_column(Text, nullable=False)
+    subject_code: Mapped[str] = mapped_column(Text, nullable=False)
+    paper_label: Mapped[str] = mapped_column(Text, nullable=False)
+    exam_year: Mapped[int | None] = mapped_column(Integer)
+    source_question_prefix: Mapped[str | None] = mapped_column(Text)
+    question_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("course_id", "paper_label", name="ux_exam_papers_course_label"),
+        Index("idx_exam_papers_course_idx", "course_id", "exam_year"),
+        Index("idx_exam_papers_category_idx", "category_id", "subject_code"),
+    )
+
+
+class ExamQuestionDetailRow(Base):
+    __tablename__ = "exam_question_details"
+
+    question_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("questions.question_id", ondelete="CASCADE"), primary_key=True
+    )
+    course_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("courses.course_id", ondelete="CASCADE"), nullable=False
+    )
+    paper_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("exam_papers.paper_id", ondelete="CASCADE"), nullable=False
+    )
+    category_id: Mapped[str] = mapped_column(Text, nullable=False)
+    subject_code: Mapped[str] = mapped_column(Text, nullable=False)
+    source_question_id: Mapped[str] = mapped_column(Text, nullable=False)
+    source_row: Mapped[int | None] = mapped_column(Integer)
+    original_question_number: Mapped[str | None] = mapped_column(Text)
+    question_type: Mapped[str] = mapped_column(Text, nullable=False, default="unknown")
+    question_type_raw: Mapped[str | None] = mapped_column(Text)
+    options_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    has_options: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    exam_year: Mapped[int | None] = mapped_column(Integer)
+    source_file: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("course_id", "source_question_id", name="ux_exam_details_course_source"),
+        Index("idx_exam_details_course_idx", "course_id", "exam_year", "question_type"),
+        Index("idx_exam_details_paper_idx", "paper_id"),
+    )
+
+
+class ExamAnswerRow(Base):
+    __tablename__ = "exam_answers"
+
+    answer_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    question_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("questions.question_id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    course_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("courses.course_id", ondelete="CASCADE"), nullable=False
+    )
+    source_answer_id: Mapped[str | None] = mapped_column(Text)
+    answer_text: Mapped[str] = mapped_column(Text, nullable=False)
+    answer_type: Mapped[str] = mapped_column(Text, nullable=False)
+    answer_type_raw: Mapped[str | None] = mapped_column(Text)
+    correct_option_key: Mapped[str | None] = mapped_column(Text)
+    solution_steps: Mapped[str | None] = mapped_column(Text)
+    match_method: Mapped[str] = mapped_column(Text, nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+    warnings_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+    __table_args__ = (Index("idx_exam_answers_course_idx", "course_id", "answer_type"),)
+
+
+class ExamImportRunRow(Base):
+    __tablename__ = "exam_import_runs"
+
+    run_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    started_at: Mapped[str] = mapped_column(Text, nullable=False)
+    finished_at: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    totals_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    warnings_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    errors_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class ExamImportFileRow(Base):
+    __tablename__ = "exam_import_files"
+
+    file_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("exam_import_runs.run_id", ondelete="CASCADE"), nullable=False
+    )
+    category_id: Mapped[str] = mapped_column(Text, nullable=False)
+    subject_code: Mapped[str] = mapped_column(Text, nullable=False)
+    course_id: Mapped[str] = mapped_column(Text, nullable=False)
+    relative_path: Mapped[str] = mapped_column(Text, nullable=False)
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    row_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    imported_questions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    imported_answers: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    skipped_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    failed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    report_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+
+    __table_args__ = (
+        Index("idx_exam_import_files_run_idx", "run_id"),
+        Index("idx_exam_import_files_course_idx", "course_id", "kind"),
+    )
+
+
 class MisconceptionRow(Base):
     __tablename__ = "misconceptions"
 
@@ -948,4 +1069,9 @@ DOMAIN_TABLES = (
     GeneratedQuestionRow.__table__,
     StudentResponseRow.__table__,
     MisconceptionRow.__table__,
+    ExamPaperRow.__table__,
+    ExamQuestionDetailRow.__table__,
+    ExamAnswerRow.__table__,
+    ExamImportRunRow.__table__,
+    ExamImportFileRow.__table__,
 )

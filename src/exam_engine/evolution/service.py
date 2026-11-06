@@ -24,11 +24,17 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
+from sqlalchemy import select
+
 from exam_engine.analytics.metadata import ExamPeriod, resolve_exam_period
 from exam_engine.config import CoverageSettings, EvolutionSettings, ExamDnaSettings
 from exam_engine.coverage.service import CoverageError, CoverageService
 from exam_engine.evolution.dates import DocumentDate, resolve_document_date
-from exam_engine.exam_dna.service import ExamDnaError, ExamDnaService
+from exam_engine.exam_dna.service import (
+    ExamDnaError,
+    ExamDnaService,
+    _virtual_paper_document,
+)
 from exam_engine.graph.service import GraphService
 from exam_engine.models.analytics import CourseScope
 from exam_engine.models.course import CourseRecord
@@ -86,6 +92,7 @@ from exam_engine.storage.repositories import (
     QuestionRepository,
     SyllabusRepository,
 )
+from exam_engine.storage.schema import ExamPaperRow, ExamQuestionDetailRow
 
 logger = logging.getLogger(__name__)
 
@@ -537,6 +544,56 @@ class ConceptEvolutionService:
             matches: dict[str, list[UnitMatch]] = defaultdict(list)
             for match in understanding.list_unit_matches_for_course(request.course_id):
                 matches[match.question_id].append(match)
+            paper_rows = {
+                row.paper_id: row
+                for row in session.scalars(
+                    select(ExamPaperRow).where(ExamPaperRow.course_id == request.course_id)
+                ).all()
+            }
+            paper_by_question: dict[str, str] = {
+                row[0]: row[1]
+                for row in session.execute(
+                    select(
+                        ExamQuestionDetailRow.question_id,
+                        ExamQuestionDetailRow.paper_id,
+                    ).where(ExamQuestionDetailRow.course_id == request.course_id)
+                ).all()
+            }
+
+        questions_by_document: dict[str, list[QuestionRecord]] = defaultdict(list)
+        for question in questions:
+            questions_by_document[question.document_id].append(question)
+        scoped_documents: list[DocumentRecord] = []
+        question_documents: dict[str, str] = {}
+        for document in documents:
+            items = questions_by_document.get(document.document_id, [])
+            if document.kind is DocumentKind.QUESTION_BANK and items:
+                grouped: dict[str, list[QuestionRecord]] = defaultdict(list)
+                for question in items:
+                    paper_id = paper_by_question.get(question.question_id)
+                    if paper_id is not None:
+                        grouped[paper_id].append(question)
+                if grouped and sum(len(group) for group in grouped.values()) == len(items):
+                    for paper_id, group in sorted(grouped.items()):
+                        paper_row = paper_rows.get(paper_id)
+                        if paper_row is None:
+                            continue
+                        virtual = _virtual_paper_document(document, paper_row, group)
+                        for question in group:
+                            question_documents[question.question_id] = virtual.document_id
+                        scoped_documents.append(virtual)
+                    continue
+            scoped_documents.append(document)
+        documents = scoped_documents
+        if question_documents:
+            questions = [
+                question.model_copy(
+                    update={"document_id": question_documents[question.question_id]}
+                )
+                if question.question_id in question_documents
+                else question
+                for question in questions
+            ]
 
         periods = {
             document.document_id: resolve_exam_period(document, course) for document in documents
@@ -2115,13 +2172,17 @@ class ConceptEvolutionService:
         for data in loaded.syllabus_data:
             year = data.syllabus.syllabus_id
             try:
+                document_ids = sorted(
+                    {
+                        str(document.metadata.get("parent_document_id") or document.document_id)
+                        for document in loaded.documents
+                    }
+                )
                 report = coverage.analyze(
                     CoverageRequest(
                         course_id=loaded.course.course_id,
                         syllabus_id=year,
-                        filters=CoverageFilters(
-                            document_ids=[item.document_id for item in loaded.documents]
-                        ),
+                        filters=CoverageFilters(document_ids=document_ids),
                     )
                 )
             except (CoverageError, ValueError) as exc:

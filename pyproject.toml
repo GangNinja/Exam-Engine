@@ -37,6 +37,14 @@ where = ["src"]
 [tool.setuptools.package-data]
 exam_engine = [
     "storage/migrations/*.sql",
+    "dashboard/static/*.html",
+    "dashboard/static/*.css",
+    "dashboard/static/*.svg",
+    "dashboard/static/*.js",
+    "dashboard/static/views/*.js",
+    "dashboard/static/vendor/hairline/*.js",
+    "dashboard/static/vendor/hairline/LICENSE",
+    "dashboard/static/vendor/hairline/PROVENANCE.json",
 ]
 
 [tool.pytest.ini_options]

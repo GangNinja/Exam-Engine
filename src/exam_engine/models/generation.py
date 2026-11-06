@@ -46,6 +46,13 @@ class GenerationRequest(BaseModel):
     concept_ids: list[str] = Field(default_factory=list)
     unit_id: str | None = None
     count: int = Field(default=5, ge=1)
+    expand_batch: bool = Field(
+        default=False,
+        description=(
+            "Continue with other concepts in the same syllabus when the requested "
+            "count exceeds the selected concepts, so one batch is not one repeated prompt."
+        ),
+    )
     format: GenerationFormat = GenerationFormat.EXPLANATION
     difficulty: DifficultyLabel | None = None
     bloom: BloomLevel | None = None

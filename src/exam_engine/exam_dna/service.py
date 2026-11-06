@@ -20,6 +20,8 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from sqlalchemy import select
+
 from exam_engine.analytics.metadata import ExamPeriod, resolve_exam_period
 from exam_engine.config import CoverageSettings, ExamDnaSettings
 from exam_engine.coverage.service import CoverageError, CoverageService
@@ -84,6 +86,7 @@ from exam_engine.storage.repositories import (
     DocumentRepository,
     QuestionRepository,
 )
+from exam_engine.storage.schema import ExamPaperRow, ExamQuestionDetailRow
 
 logger = logging.getLogger(__name__)
 
@@ -191,6 +194,56 @@ class _Loaded:
     papers: list[_Paper]
     similarities: list[SimilarityMatch]
     question_count: int
+
+
+def _virtual_paper_document(
+    parent: DocumentRecord, paper: Any, questions: list[QuestionRecord]
+) -> DocumentRecord:
+    """Present a stored exam paper as a read-only paper document for Phase 8."""
+    body = "\n".join(item.text for item in questions)
+    digest = hashlib.sha256(
+        f"{parent.course_id}\x1f{paper.paper_id}\x1f{body}".encode()
+    ).hexdigest()
+    metadata = dict(parent.metadata)
+    metadata.update(
+        {
+            "paper_label": paper.paper_label,
+            "exam_year": paper.exam_year,
+            "parent_document_id": parent.document_id,
+            "derived_paper": True,
+            "source_csv": parent.metadata.get("source_csv"),
+        }
+    )
+    return DocumentRecord(
+        document_id=paper.paper_id,
+        course_id=parent.course_id,
+        source_id=parent.source_id,
+        kind=DocumentKind.QUESTION_PAPER,
+        format=parent.format,
+        title=f"{parent.title} — {paper.paper_label}",
+        original_filename=parent.original_filename,
+        content_sha256=digest,
+        text_fingerprint=hashlib.sha256(body.encode()).hexdigest(),
+        byte_size=len(body.encode("utf-8")),
+        page_count=1,
+        char_count=len(body),
+        extraction_status=ExtractionStatus.OK,
+        quality_score=parent.quality_score,
+        language=parent.language,
+        academic_year=str(paper.exam_year) if paper.exam_year else parent.academic_year,
+        relative_path=parent.relative_path,
+        ingested_at=parent.ingested_at,
+        pipeline_version="phase13-paper-group-v1",
+        metadata=metadata,
+        warnings=list(parent.warnings),
+    )
+
+
+def _paper_selected(paper: _Paper, document_ids: set[str]) -> bool:
+    if paper.document.document_id in document_ids:
+        return True
+    parent = paper.document.metadata.get("parent_document_id")
+    return bool(parent and str(parent) in document_ids)
 
 
 @dataclass
@@ -452,6 +505,21 @@ class ExamDnaService:
             for match in understanding.list_unit_matches_for_course(request.course_id):
                 matches[match.question_id].append(match)
             similarities = understanding.list_similarities(request.course_id)
+            paper_rows = {
+                row.paper_id: row
+                for row in session.scalars(
+                    select(ExamPaperRow).where(ExamPaperRow.course_id == request.course_id)
+                ).all()
+            }
+            paper_by_question: dict[str, str] = {
+                row[0]: row[1]
+                for row in session.execute(
+                    select(
+                        ExamQuestionDetailRow.question_id,
+                        ExamQuestionDetailRow.paper_id,
+                    ).where(ExamQuestionDetailRow.course_id == request.course_id)
+                ).all()
+            }
 
         periods = {
             document.document_id: resolve_exam_period(document, course) for document in documents
@@ -475,6 +543,7 @@ class ExamDnaService:
                 )
             )
         papers: list[_Paper] = []
+        scoped_documents: list[DocumentRecord] = []
         for document in sorted(documents, key=lambda item: item.document_id):
             items = sorted(
                 by_document.get(document.document_id, []),
@@ -483,6 +552,36 @@ class ExamDnaService:
                     entry.question.question_id,
                 ),
             )
+            if document.kind is DocumentKind.QUESTION_BANK and items:
+                grouped: dict[str, list[_PaperQuestion]] = defaultdict(list)
+                for item in items:
+                    paper_id = paper_by_question.get(item.question.question_id)
+                    if paper_id is not None:
+                        grouped[paper_id].append(item)
+                if grouped and sum(len(group) for group in grouped.values()) == len(items):
+                    for paper_id, group in sorted(grouped.items()):
+                        paper_row = paper_rows.get(paper_id)
+                        if paper_row is None:
+                            continue
+                        virtual = _virtual_paper_document(
+                            document, paper_row, [item.question for item in group]
+                        )
+                        period = resolve_exam_period(virtual, course)
+                        periods[virtual.document_id] = period
+                        for item in group:
+                            item.document = virtual
+                            item.period = period
+                        papers.append(
+                            _Paper(
+                                document=virtual,
+                                period=period,
+                                questions=group,
+                                signature=_question_signature(group),
+                            )
+                        )
+                        scoped_documents.append(virtual)
+                    continue
+            scoped_documents.append(document)
             papers.append(
                 _Paper(
                     document=document,
@@ -494,7 +593,7 @@ class ExamDnaService:
         papers.sort(key=lambda paper: (paper.period.sort_key, paper.document.document_id))
         return _Loaded(
             course=course,
-            documents=documents,
+            documents=scoped_documents,
             periods=periods,
             papers=papers,
             similarities=similarities,
@@ -519,7 +618,7 @@ class ExamDnaService:
         date_excluded: list[_Paper] = []
         for paper in question_papers:
             document = paper.document
-            if document_ids and document.document_id not in document_ids:
+            if document_ids and not _paper_selected(paper, document_ids):
                 continue
             if source_ids and document.source_id not in source_ids:
                 continue
@@ -544,6 +643,11 @@ class ExamDnaService:
 
     def _validate_filters(self, loaded: _Loaded, papers: list[_Paper], filters: Any) -> None:
         known_documents = {document.document_id for document in loaded.documents}
+        known_documents.update(
+            str(document.metadata["parent_document_id"])
+            for document in loaded.documents
+            if document.metadata.get("parent_document_id")
+        )
         known_sources = {document.source_id for document in loaded.documents}
         known_types = {
             (paper.period.exam_type or "").casefold() for paper in papers if paper.period.exam_type
@@ -672,14 +776,20 @@ class ExamDnaService:
         return kept, truncated
 
     def _coverage(self, request: ExamDnaRequest, eligible: list[_Paper]) -> CoverageReport:
-        document_ids = [paper.document.document_id for paper in eligible]
+        virtual = any(paper.document.metadata.get("derived_paper") for paper in eligible)
+        document_ids = sorted(
+            {
+                str(paper.document.metadata.get("parent_document_id") or paper.document.document_id)
+                for paper in eligible
+            }
+        )
         coverage_request = CoverageRequest(
             course_id=request.course_id,
             syllabus_id=request.syllabus_id,
             filters=CoverageFilters(
                 document_ids=document_ids,
                 source_ids=request.filters.source_ids,
-                exam_periods=request.filters.exam_periods,
+                exam_periods=[] if virtual else request.filters.exam_periods,
             ),
         )
         service = CoverageService(self.db, self.coverage_settings)

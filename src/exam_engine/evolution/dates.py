@@ -9,6 +9,7 @@ date.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
 
@@ -163,8 +164,25 @@ def resolve_document_date(
 
     kind = document.kind
     exam: list[tuple[str, date]] = []
+    approximate = False
     if kind is DocumentKind.QUESTION_PAPER and period is not None and period.exact_date:
         exam.append(("exam_period.exact_date", period.exact_date))
+    elif (
+        kind is DocumentKind.QUESTION_PAPER
+        and period is not None
+        and period.known
+        and period.source == "academic_year"
+        and document.metadata.get("derived_paper") is True
+    ):
+        # A source year is real evidence but it is not an exact calendar day.
+        # Use the first day only as an ordering key and mark the date unconfident.
+        # Only a year-level academic year qualifies: a session such as ``2020-05``
+        # is a period label, not permission to invent January 1.
+        year_match = re.search(r"(?:19|20)\d{2}", period.label or period.sort_key)
+        if year_match:
+            year = int(year_match.group(0))
+            exam.append((f"exam_period.year:{year}", date(year, 1, 1)))
+            approximate = True
 
     groups = (
         (effective, EvolutionDateType.SYLLABUS_EFFECTIVE),
@@ -209,7 +227,7 @@ def resolve_document_date(
         value=chosen,
         date_type=date_type,
         source=chosen_source,
-        confident=not conflicts,
+        confident=not conflicts and not approximate,
         conflicts=tuple(conflicts),
         invalid=invalid,
         candidates=candidates,

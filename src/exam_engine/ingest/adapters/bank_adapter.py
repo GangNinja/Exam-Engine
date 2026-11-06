@@ -55,6 +55,13 @@ FIELD_ALIASES: dict[str, tuple[str, ...]] = {
     "section": ("section", "part", "section_name", "group"),
     "unit": ("unit", "chapter", "module", "unit_name", "topic_unit"),
     "answer": ("answer", "answer_text", "solution", "key", "correct_answer"),
+    "source_question_id": ("question_id", "source_question_id", "qid", "question_uid"),
+    "original_number": ("original_question_number", "original_question_no", "original_qno"),
+    "question_type": ("question_type", "qtype", "question_kind"),
+    "options": ("options", "choices", "answer_options"),
+    "answer_id": ("answer_id", "answer_uid"),
+    "answer_type": ("answer_type", "answer_format"),
+    "solution_steps": ("solution_steps", "worked_solution"),
     "difficulty": ("difficulty", "level", "complexity"),
     "tags": ("tags", "keywords", "labels"),
 }
@@ -253,8 +260,10 @@ def _build_question(
             )
         )
 
-    raw_number = canonical.get("number")
-    number, number_sort = _parse_number(raw_number)
+    source_question_id = _clean(canonical.get("source_question_id"))
+    raw_number = canonical.get("original_number") or canonical.get("number")
+    parsed_number, number_sort = _parse_number(raw_number)
+    number = source_question_id or parsed_number
     if number is None:
         uncertainties.append(
             Uncertainty(
@@ -262,7 +271,7 @@ def _build_question(
                 message="bank row does not state a question number",
             )
         )
-    elif number in seen_numbers:
+    elif source_question_id is None and number in seen_numbers:
         uncertainties.append(
             Uncertainty(
                 code="duplicate_question_number",
@@ -270,7 +279,7 @@ def _build_question(
                 detail={"first_index": seen_numbers[number]},
             )
         )
-    else:
+    elif source_question_id is None:
         seen_numbers[number] = index
 
     marks, marks_invalid = _parse_marks(canonical.get("marks"))
@@ -310,10 +319,24 @@ def _build_question(
     section = _clean(canonical.get("section") or canonical.get("__section__"))
     unit = _clean(canonical.get("unit"))
     metadata: dict[str, Any] = {}
-    for field in ("answer", "difficulty"):
+    for field in (
+        "answer",
+        "answer_id",
+        "answer_type",
+        "solution_steps",
+        "question_type",
+        "options",
+        "difficulty",
+    ):
         value = _clean(canonical.get(field))
         if value:
             metadata[field] = value
+    if source_question_id:
+        metadata["source_question_id"] = source_question_id
+    original_number = _clean(canonical.get("original_number"))
+    if original_number:
+        metadata["original_question_number"] = original_number
+    metadata["source_row"] = index + row_offset
     tags = _parse_tags(canonical.get("tags"))
     if tags:
         metadata["tags"] = tags

@@ -120,6 +120,35 @@ def _short(text: str, limit: int = 240) -> str:
     return compact if len(compact) <= limit else compact[: limit - 1].rstrip() + "…"
 
 
+def _normalised_label(text: str) -> str:
+    return " ".join(text.casefold().strip(" .,;:").split())
+
+
+def _is_label_only(excerpt: str, label: str) -> bool:
+    """Whether a passage is just the syllabus topic rather than an explanation."""
+
+    actual = _normalised_label(excerpt)
+    expected = _normalised_label(label)
+    if not actual or not expected:
+        return False
+    return actual == expected or (expected in actual and len(actual) <= len(expected) * 1.35 + 20)
+
+
+def _answer_aspects(label: str) -> list[str]:
+    """Split a syllabus topic into checkable parts for a reference outline."""
+
+    parts: list[str] = []
+    for raw in re.split(r";|,", label):
+        part = " ".join(raw.split()).strip(" .,;:")
+        if len(part) < 3:
+            continue
+        if parts and len(part.split()) < 3:
+            parts[-1] = f"{parts[-1]}, {part}"
+        elif part.casefold() not in {item.casefold() for item in parts}:
+            parts.append(part)
+    return parts or [label.strip(" .,;:")]
+
+
 #: Placeholder put where the tested concept's name was removed from a stem.
 MASK = "_____"
 
@@ -187,7 +216,7 @@ class TemplateProvider:
 
     settings: GenerationSettings
     name: str = "template"
-    model: str | None = "phase10-templates-v1"
+    model: str | None = "templates-v1"
 
     def supports(self, fmt: GenerationFormat, bloom: BloomLevel) -> bool:
         if fmt in MODEL_ONLY_FORMATS:
@@ -397,12 +426,37 @@ class TemplateProvider:
             return draft
 
         if template.answer_mode == "excerpt":
-            if prompt.include_answer_key:
-                draft.answer_key = f'Reference from {passage.document_title}: "{passage.excerpt}"'
-            if prompt.include_explanation:
-                draft.explanation = (
-                    f'The course material for {prompt.unit_label} states: "{passage.excerpt}"'
+            aspects = _answer_aspects(prompt.concept_label)
+            label_only = _is_label_only(passage.excerpt, prompt.concept_label)
+            draft.solution_steps = [f"Cover: {aspect}." for aspect in aspects]
+            if len(aspects) > 1:
+                draft.solution_steps.append(
+                    f"Connect these points to the treatment of {prompt.unit_label}."
                 )
+            if prompt.include_answer_key:
+                if label_only:
+                    # A syllabus line is a topic, not a definition. Say so instead of
+                    # dressing the same words up as a complete model answer.
+                    draft.answer_key = (
+                        f"The stored course source names this topic but does not provide "
+                        f"a definition. A complete answer should cover: "
+                        f"{'; '.join(aspects)}."
+                    )
+                    draft.metadata["answer_key_status"] = "rubric_only"
+                else:
+                    draft.answer_key = f'Course reference: "{passage.excerpt}"'
+                    draft.metadata["answer_key_status"] = "source_excerpt"
+            if prompt.include_explanation:
+                if label_only:
+                    draft.explanation = (
+                        "The only stored evidence for this concept is its syllabus topic. "
+                        "Use the expected-answer outline and add course notes to strengthen "
+                        "the reference material."
+                    )
+                else:
+                    draft.explanation = (
+                        f'The course material for {prompt.unit_label} states: "{passage.excerpt}"'
+                    )
             return draft
 
         if template.answer_mode == "pair":
