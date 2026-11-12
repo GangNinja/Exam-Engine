@@ -10,9 +10,13 @@
   "scripts": {
     "sync:hairline": "node scripts/sync-hairline.mjs",
     "check:assets": "node scripts/check-assets.mjs",
-    "test": "node --test"
+    "test": "node --test",
+    "test:browser": "node --test browser-tests/practice-smoke.mjs"
   },
   "dependencies": {
     "@lucasmarkes/hairline": "0.5.1"
+  },
+  "devDependencies": {
+    "playwright-core": "1.65.0"
   }
 }

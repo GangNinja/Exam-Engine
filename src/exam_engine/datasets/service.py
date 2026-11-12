@@ -8,6 +8,7 @@ import io
 import json
 import time
 import uuid
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -16,13 +17,17 @@ from typing import Any
 from exam_engine.config import Settings
 from exam_engine.datasets.audit import AuditResult, audit_dataset
 from exam_engine.datasets.catalog import DatasetCatalog, ExamSubject, discover
+from exam_engine.datasets.passages import read_passages_csv
 from exam_engine.datasets.parsing import (
     derive_occurrence,
     extract_correct_option,
+    extract_passage_subparts,
+    is_passage_question,
     normalise_answer_type,
     normalise_question_type,
     parse_options,
     parse_options_from_text,
+    plausible_passage_options,
 )
 from exam_engine.datasets.syllabus import segment_exam_syllabus
 from exam_engine.ingest.adapters.pdf_adapter import PdfAdapter
@@ -35,7 +40,7 @@ from exam_engine.models.enums import (
     DuplicatePolicy,
     IngestionStatus,
 )
-from exam_engine.models.provenance import DatasetSource
+from exam_engine.models.provenance import DatasetSource, ProvenanceRecord
 from exam_engine.models.syllabus import (
     SyllabusRecord,
     SyllabusUnitRecord,
@@ -103,6 +108,7 @@ class ImportReport:
     warnings: list[str]
     errors: list[str]
     duration_ms: int
+    passage_links: dict[str, Any] | None = None
     output_path: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
@@ -128,6 +134,31 @@ def _paper_id(course_id: str, label: str) -> str:
 
 def _answer_id(question_id: str) -> str:
     return "ans_" + hashlib.sha256(question_id.encode()).hexdigest()[:24]
+
+
+def _read_source_subparts(
+    root: Path, passages: list[Any]
+) -> dict[tuple[str, str], str]:
+    """Read source subparts for passage children without touching any row."""
+    wanted = {
+        (passage.course_id, child_id)
+        for passage in passages
+        for child_id in passage.child_question_ids
+    }
+    found: dict[tuple[str, str], str] = {}
+    for path in sorted(root.rglob("*.csv")):
+        if path.name == "passages.csv":
+            continue
+        with path.open(encoding="utf-8-sig", newline="") as handle:
+            for row in csv.DictReader(handle):
+                qid = str(row.get("question_id") or "").strip()
+                raw = str(row.get("subparts_json") or "").strip()
+                if not qid or not raw:
+                    continue
+                for key in wanted:
+                    if key[1] == qid and key not in found:
+                        found[key] = raw
+    return found
 
 
 def course_for_subject(subject: ExamSubject) -> CourseRecord:
@@ -219,6 +250,13 @@ class ExamDatasetService:
             elif not subject.syllabus_paths:
                 warnings.append(f"{subject.course_id}: no syllabus PDF matched this subject")
 
+        passage_links: dict[str, Any] | None = None
+        if not dry_run and (root_path / "passages.csv").exists():
+            try:
+                passage_links = self.import_passages(root_path)
+            except Exception as exc:  # noqa: BLE001 - import report must survive
+                warnings.append(f"passage link import failed: {type(exc).__name__}: {exc}")
+
         finished = _now()
         duration_ms = int((time.perf_counter() - started_perf) * 1000)
         totals = {
@@ -263,6 +301,7 @@ class ExamDatasetService:
             warnings=warnings,
             errors=errors,
             duration_ms=duration_ms,
+            passage_links=passage_links,
         )
         target = Path(output_dir)
         target.mkdir(parents=True, exist_ok=True)
@@ -417,6 +456,46 @@ class ExamDatasetService:
             errors=errors,
         )
 
+    # -- passage context ---------------------------------------------------
+    def import_passages(
+        self, root: Path | str = Path("datasets"), *, dry_run: bool = False
+    ) -> dict[str, Any]:
+        """Link the source ``passages.csv`` sidecar to imported question rows.
+
+        The source files are read-only.  Existing question ids, text, options and
+        answers are never rewritten; only the additive passage link columns are
+        updated.  No passage is invented when a child id cannot be matched.
+        """
+        root_path = Path(root)
+        passages = read_passages_csv(root_path / "passages.csv")
+        if not passages:
+            return {
+                "passages": 0,
+                "linked": 0,
+                "missing": [],
+                "dry_run": dry_run,
+                "message": "no passages.csv records found",
+            }
+        if dry_run:
+            return {
+                "passages": len(passages),
+                "linked": 0,
+                "missing": [
+                    child_id
+                    for passage in passages
+                    for child_id in passage.child_question_ids
+                ],
+                "dry_run": True,
+                "message": "dry run: nothing written",
+            }
+        subparts = _read_source_subparts(root_path, passages)
+        with self.db.transaction() as session:
+            repository = ExamDatasetRepository(session)
+            result = repository.upsert_passages(passages)
+            result["subparts_updated"] = repository.update_subparts(subparts)
+        result["dry_run"] = False
+        return result
+
     # -- projection --------------------------------------------------------
     def _project_document(
         self, document_id: str, course_id: str, subject: ExamSubject, source_file: str
@@ -459,10 +538,36 @@ class ExamDatasetService:
             papers[paper_key]["question_count"] += 1
 
             question_type_raw = _optional(metadata.get("question_type"))
-            options = parse_options(_optional(metadata.get("options")))
+            options_raw = _optional(metadata.get("options"))
+            options = parse_options(options_raw)
+            answer_text = _optional(metadata.get("answer"))
+            answer_type_raw = _optional(metadata.get("answer_type"))
+            answer_type = normalise_answer_type(answer_type_raw, answer_text)
+            passage_question = is_passage_question(question.text)
+            passage_subparts = (
+                extract_passage_subparts(question.text)
+                if passage_question and answer_type != "mcq_option"
+                else []
+            )
+            # Lettered subquestions in a descriptive passage row are not
+            # multiple-choice options, but a single passage MCQ still has real
+            # A-D choices.  Recover first, then discard only a list that is
+            # clearly the subpart set.
             if not options:
-                options = parse_options_from_text(question.text)
-            question_type = normalise_question_type(question_type_raw, has_options=bool(options))
+                options = parse_options_from_text(question.text, answer_text=answer_text)
+            if passage_question and not options_raw:
+                if (answer_type != "mcq_option" and passage_subparts) or len(options) > 5:
+                    options = []
+                elif not plausible_passage_options(options):
+                    options = []
+            question_type = (
+                "passage_based"
+                if passage_question
+                else normalise_question_type(question_type_raw, has_options=bool(options))
+            )
+            subparts_json = _optional(metadata.get("subparts_json"))
+            if not subparts_json and passage_subparts:
+                subparts_json = json.dumps(passage_subparts, ensure_ascii=False)
             details.append(
                 {
                     "question_id": question.question_id,
@@ -483,15 +588,20 @@ class ExamDatasetService:
                     "has_options": 1 if options else 0,
                     "exam_year": year,
                     "source_file": source_file,
+                    # The sidecar rows are inserted by import_passages after a
+                    # course exists.  Keeping the FK null here avoids writing an
+                    # invalid reference when the row is imported before that
+                    # explicit backfill; the source passage id is retained in
+                    # the sidecar and is linked there.
+                    "passage_id": None,
+                    "passage_order": None,
+                    "subparts_json": subparts_json or "[]",
                     "created_at": now,
                 }
             )
 
-            answer_text = _optional(metadata.get("answer"))
             if not answer_text:
                 continue
-            answer_type_raw = _optional(metadata.get("answer_type"))
-            answer_type = normalise_answer_type(answer_type_raw, answer_text)
             answer_warnings: list[str] = []
             correct_option = extract_correct_option(answer_text, answer_type, options)
             if answer_type == "mcq_option" and options and correct_option is None:
@@ -516,12 +626,17 @@ class ExamDatasetService:
                 }
             )
         with self.db.transaction() as session:
-            ExamDatasetRepository(session).replace_document_projection(
+            repository = ExamDatasetRepository(session)
+            repository.replace_document_projection(
                 document_id,
                 papers=list(papers.values()),
                 details=details,
                 answers=answers,
             )
+            # Provenance is rebuilt from the stored projection so every imported
+            # row carries an explicit, evidence-scoped record even when all of
+            # its official metadata is unknown.
+            repository.replace_document_provenance(document_id)
         return len(details), len(answers)
 
     # -- syllabus fallback -------------------------------------------------
@@ -575,6 +690,15 @@ class ExamDatasetService:
         return len(units), [
             f"inferred_syllabus_structure: {len(units)} unit(s) recovered with review flags"
         ]
+
+    def record_provenance(self, records: Sequence[ProvenanceRecord]) -> int:
+        """Store validated provenance supplied by a future importer.
+
+        Existing unknown rows are replaced by id; nothing is inferred from a
+        filename or from a local question id.
+        """
+        with self.db.transaction() as session:
+            return ExamDatasetRepository(session).add_provenance(list(records))
 
     # -- status ------------------------------------------------------------
     def status(self) -> dict[str, Any]:

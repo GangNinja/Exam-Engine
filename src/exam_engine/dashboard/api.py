@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -69,9 +70,11 @@ from exam_engine.models.provenance import DatasetSource
 from exam_engine.nlp.service import NlpService
 from exam_engine.prerequisite.discovery import PrerequisiteDiscoveryService
 from exam_engine.prerequisite.path import LearningPathService
+from exam_engine.recovery.service import DatasetRecoveryService
 from exam_engine.storage.db import Database, open_database
 from exam_engine.storage.nlp_repositories import NlpRunRepository
 from exam_engine.storage.question_repositories import UnderstandingRunRepository
+from exam_engine.storage.recovery_repository import RecoveryRepository
 from exam_engine.storage.repositories import (
     CourseRepository,
     DatasetSourceRepository,
@@ -107,6 +110,19 @@ def _dump(value: Any) -> Any:
     if hasattr(value, "model_dump"):
         return value.model_dump(mode="json")
     return value
+
+
+def _tutor_ask_arguments(body: dict[str, Any]) -> tuple[str, str | None, str | None]:
+    question = body.get("question")
+    if not isinstance(question, str) or not question.strip():
+        raise ApiError(400, "invalid_request", "question must be a non-empty string")
+    concept_id = body.get("concept_id")
+    if concept_id is not None and not isinstance(concept_id, str):
+        raise ApiError(400, "invalid_request", "concept_id must be a string")
+    syllabus_id = body.get("syllabus_id")
+    if syllabus_id is not None and not isinstance(syllabus_id, str):
+        raise ApiError(400, "invalid_request", "syllabus_id must be a string")
+    return question, concept_id, syllabus_id
 
 
 def _query_one(query: dict[str, list[str]], key: str, default: str | None = None) -> str | None:
@@ -240,10 +256,36 @@ class DashboardAPI:
             return ApiResponse(200, self._health())
         if route == ["capabilities"]:
             return ApiResponse(200, self._capabilities())
+        if route == ["recovery"]:
+            return ApiResponse(200, self._recovery_overview(query))
+        if route == ["recovery", "courses"]:
+            return ApiResponse(200, self._recovery_courses(query))
+        if route == ["recovery", "issues"]:
+            return ApiResponse(200, self._recovery_issues(query))
+        if route == ["recovery", "providers"]:
+            return ApiResponse(200, self._recovery_providers())
+        if route == ["recovery", "crawl", "health"]:
+            from exam_engine.recovery.crawl4ai_adapter import Crawl4AIHealth
+
+            return ApiResponse(200, Crawl4AIHealth.check(force=False))
+        if route == ["recovery", "sources"]:
+            return ApiResponse(200, self._recovery_sources(query))
+        if len(route) == 3 and route[:2] == ["recovery", "courses"]:
+            return ApiResponse(200, self._recovery_course(route[2], query))
+        if len(route) == 3 and route[:2] == ["recovery", "records"]:
+            return ApiResponse(200, self._recovery_record(route[2], query))
+        if len(route) == 3 and route[:2] == ["recovery", "runs"]:
+            return ApiResponse(200, self._recovery_run_status(route[2]))
+        if len(route) == 3 and route[:2] == ["recovery", "exports"]:
+            return ApiResponse(200, self._recovery_export(route[2], query))
         if route == ["exams"]:
             return ApiResponse(200, self._exams(query))
         if route == ["exams", "questions"]:
             return ApiResponse(200, self._exam_questions(query))
+        if len(route) == 3 and route[:2] == ["exams", "questions"]:
+            return ApiResponse(200, self._exam_question(route[2]))
+        if len(route) == 3 and route[:2] == ["exams", "passages"]:
+            return ApiResponse(200, self._exam_passage(route[2]))
         if route == ["exams", "papers"]:
             return ApiResponse(200, self._exam_papers(query))
         if route == ["exams", "syllabus"]:
@@ -309,6 +351,14 @@ class DashboardAPI:
     def _post(self, route: list[str], query: dict[str, list[str]], body: bytes) -> ApiResponse:
         if route == ["courses"]:
             return self._create_course(self._json_body(body))
+        if route == ["recovery", "run"]:
+            return self._recovery_run(self._json_body(body))
+        if route == ["recovery", "repairs", "review"]:
+            return self._recovery_review(self._json_body(body))
+        if route == ["recovery", "rollback"]:
+            return self._recovery_rollback(self._json_body(body))
+        if route == ["recovery", "crawl"]:
+            return self._recovery_crawl(self._json_body(body))
         if len(route) < 2 or route[0] != "courses":
             raise ApiError(404, "not_found", "no such API route")
         course_id = route[1]
@@ -431,6 +481,15 @@ class DashboardAPI:
                     ),
                 },
                 {
+                    "id": "dataset_recovery",
+                    "label": "Dataset recovery",
+                    "available": True,
+                    "detail": (
+                        "Audits schemas, structure, options, answers and source fidelity; "
+                        "keeps repairs and unverified answers quarantined for review."
+                    ),
+                },
+                {
                     "id": "grading",
                     "label": "Answer checks",
                     "available": True,
@@ -461,10 +520,15 @@ class DashboardAPI:
             },
             "authentication": {"enabled": False},
             "privacy": {
-                "network_requests": False,
+                "network_requests": bool(
+                    tutor["web_search"]["available"]
+                    and tutor["conversational_reasoning"]["available"]
+                ),
                 "detail": (
-                    "All assets are served locally; the dashboard makes no third-party "
-                    "requests and has no analytics or telemetry."
+                    "Stored data stays local. When the AI tutor is enabled it may send "
+                    "the current question and cited snippets to the configured model and "
+                    "search provider; there is no analytics or telemetry. Disable the "
+                    "tutor provider to stay fully offline."
                 ),
             },
         }
@@ -487,6 +551,7 @@ class DashboardAPI:
             answer_type=_query_one(query, "answer_type"),
             unit_id=_query_one(query, "unit_id"),
             topic=_query_one(query, "topic"),
+            question_id=_query_one(query, "question_id"),
             search=_query_one(query, "search"),
         )
 
@@ -501,6 +566,20 @@ class DashboardAPI:
         offset = _query_int(query, "offset", 0, maximum=100000)
         with self._db() as database, database.session() as session:
             return ExamDatasetQueries(session).questions(filters, limit=limit, offset=offset)
+
+    def _exam_passage(self, passage_id: str) -> dict[str, Any]:
+        with self._db() as database, database.session() as session:
+            payload = ExamDatasetQueries(session).passage(passage_id)
+        if payload is None:
+            raise ApiError(404, "unknown_passage", f"no passage {passage_id!r} exists")
+        return payload
+
+    def _exam_question(self, question_id: str) -> dict[str, Any]:
+        with self._db() as database, database.session() as session:
+            payload = ExamDatasetQueries(session).question(question_id)
+        if payload is None:
+            raise ApiError(404, "unknown_question", f"no question {question_id!r} exists")
+        return payload
 
     def _exam_papers(self, query: dict[str, list[str]]) -> dict[str, Any]:
         filters = self._exam_filters(query)
@@ -523,18 +602,19 @@ class DashboardAPI:
         return open_database(self.db_path, migrate_schema=False)
 
     def _status_rows(
-        self, database: Database
+        self, database: Database, course_id: str | None = None
     ) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
         nlp: dict[str, dict[str, Any]] = {
-            str(row["course_id"]): row for row in NlpService(database, self.settings.nlp).status()
+            str(row["course_id"]): row
+            for row in NlpService(database, self.settings.nlp).status(course_id)
         }
         understanding: dict[str, dict[str, Any]] = {
             str(row["course_id"]): row
-            for row in UnderstandingService(database, self.settings.understanding).status()
+            for row in UnderstandingService(database, self.settings.understanding).status(course_id)
         }
         graph: dict[str, dict[str, Any]] = {
             str(row["course_id"]): dict(row)
-            for row in GraphService(database, self.settings.graph).status()
+            for row in GraphService(database, self.settings.graph).status(course_id)
         }
         return nlp, understanding, graph
 
@@ -634,7 +714,7 @@ class DashboardAPI:
             course = CourseRepository(session).get(course_id)
             if course is None:
                 raise ApiError(404, "unknown_course", f"no course {course_id!r} exists")
-            nlp_rows, und_rows, graph_rows = self._status_rows(database)
+            nlp_rows, und_rows, graph_rows = self._status_rows(database, course_id)
             summary = self._course_summary(session, course, nlp_rows, und_rows, graph_rows)
             documents = DocumentRepository(session).list_by_course(course_id)
             sources = {item.source_id: item for item in DatasetSourceRepository(session).list()}
@@ -987,6 +1067,12 @@ class DashboardAPI:
         payload["view"] = self._view(query)
         if payload["view"] == "summary":
             truncation: dict[str, Any] = {}
+            # The paper analyzer needs every adjacent-period comparison so the
+            # client can switch years; a flat first-N trim silently hid all
+            # comparisons after the first pair.
+            trend_changes_limit = _query_int(
+                query, "trend_changes_limit", 60, minimum=1, maximum=5000
+            )
             for path, limit in (
                 (("mapping", "units"), 100),
                 (("mapping", "topics"), 100),
@@ -999,7 +1085,7 @@ class DashboardAPI:
                 (("repetition", "similarity_pairs"), 25),
                 (("repetition", "document_frequency"), 50),
                 (("trends", "periods"), 60),
-                (("trends", "changes"), 60),
+                (("trends", "changes"), trend_changes_limit),
                 (("trends", "new_topics"), 30),
                 (("topic_priority", "topics"), 25),
             ):
@@ -1022,7 +1108,11 @@ class DashboardAPI:
             ),
         )
         with self._db() as database:
-            report = CoverageService(database, self.settings.coverage).analyze(request)
+            report = CoverageService(database, self.settings.coverage).analyze(
+                request,
+                include_topic_fallback=True,
+                include_question_assignments=True,
+            )
         payload = _dump(report)
         view = self._view(query)
         payload["view"] = view
@@ -1032,7 +1122,7 @@ class DashboardAPI:
             if status is not None:
                 concepts = [item for item in concepts if item.get("status") == status.value]
             concepts_total = len(concepts)
-            limit = _query_int(query, "limit", 100, minimum=1, maximum=500)
+            limit = _query_int(query, "limit", 100, minimum=1, maximum=2000)
             selected = concepts[:limit]
             for concept in selected:
                 concept["supporting_questions"] = concept.get("supporting_questions", [])[:3]
@@ -1210,7 +1300,7 @@ class DashboardAPI:
             target_node_id=target,
             target_node_type=GraphNodeType.CONCEPT,
             known_concept_ids=known,
-            include_candidates=bool(body.get("include_candidates", True)),
+            include_candidates=bool(body.get("include_candidates", False)),
             include_inferred=bool(body.get("include_inferred", False)),
             max_depth=int(body.get("max_depth", 8)),
         )
@@ -1341,8 +1431,12 @@ class DashboardAPI:
             "concepts": concepts,
             "units": unit_payload,
             "providers": [
-                {"name": "template", **service.describe_provider("template")},
-                {"name": "auto", **service.describe_provider("auto")},
+                {
+                    **service.describe_provider(name),
+                    "name": name,
+                    "resolved_name": service.describe_provider(name).get("name"),
+                }
+                for name in ("template", "auto")
             ],
             "formats": service.capabilities(),
         }
@@ -1561,19 +1655,14 @@ class DashboardAPI:
     # -- tutor -------------------------------------------------------------
     def _tutor_context(self, course_id: str, query: dict[str, list[str]]) -> dict[str, Any]:
         syllabus_id = _query_one(query, "syllabus_id")
+        limit = _query_int(query, "limit", 12, minimum=1, maximum=100)
         with self._db() as database:
-            return TutorService(database, self.settings).context(course_id, syllabus_id=syllabus_id)
+            return TutorService(database, self.settings).context(
+                course_id, syllabus_id=syllabus_id, limit=limit
+            )
 
     def _tutor_ask(self, course_id: str, body: dict[str, Any]) -> ApiResponse:
-        question = body.get("question")
-        if not isinstance(question, str) or not question.strip():
-            raise ApiError(400, "invalid_request", "question must be a non-empty string")
-        concept_id = body.get("concept_id")
-        if concept_id is not None and not isinstance(concept_id, str):
-            raise ApiError(400, "invalid_request", "concept_id must be a string")
-        syllabus_id = body.get("syllabus_id")
-        if syllabus_id is not None and not isinstance(syllabus_id, str):
-            raise ApiError(400, "invalid_request", "syllabus_id must be a string")
+        question, concept_id, syllabus_id = _tutor_ask_arguments(body)
         with self._db() as database:
             answer = TutorService(database, self.settings).ask(
                 course_id,
@@ -1582,6 +1671,267 @@ class DashboardAPI:
                 syllabus_id=syllabus_id,
             )
         return ApiResponse(200, answer)
+
+    def parse_tutor_ask_stream_request(self, body: bytes) -> dict[str, Any]:
+        """Parse and validate a stream request before SSE headers are sent."""
+
+        payload = self._json_body(body)
+        _tutor_ask_arguments(payload)
+        return payload
+
+    def stream_tutor_ask(
+        self,
+        course_id: str,
+        body: dict[str, Any],
+        *,
+        on_event: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        question, concept_id, syllabus_id = _tutor_ask_arguments(body)
+        with self._db() as database:
+            return TutorService(database, self.settings).ask(
+                course_id,
+                question,
+                concept_id=concept_id,
+                syllabus_id=syllabus_id,
+                on_event=on_event,
+            )
+
+    # -- dataset recovery --------------------------------------------------
+    def _recovery_overview(self, query: dict[str, list[str]]) -> dict[str, Any]:
+        from exam_engine.recovery.archives import load_archive_specs
+        from exam_engine.recovery.crawl4ai_adapter import Crawl4AIHealth
+
+        with self._db() as database, database.session() as session:
+            payload = RecoveryRepository(session).overview(_query_one(query, "run_id"))
+        payload["crawl4ai"] = Crawl4AIHealth.check(force=False)
+        payload["official_archives"] = [spec.status() for spec in load_archive_specs()]
+        return payload
+
+    def _recovery_courses(self, query: dict[str, list[str]]) -> dict[str, Any]:
+        with self._db() as database, database.session() as session:
+            rows = RecoveryRepository(session).list_courses(_query_one(query, "run_id"))
+        return {"courses": rows, "total": len(rows)}
+
+    def _recovery_course(self, course_id: str, query: dict[str, list[str]]) -> dict[str, Any]:
+        limit = _query_int(query, "limit", 50, minimum=1, maximum=200)
+        offset = _query_int(query, "offset", 0, maximum=100000)
+        with self._db() as database, database.session() as session:
+            payload = RecoveryRepository(session).course_detail(
+                course_id,
+                run_id=_query_one(query, "run_id"),
+                limit=limit,
+                offset=offset,
+            )
+        if payload is None:
+            raise ApiError(404, "unknown_recovery_course", f"no recovery report for {course_id!r}")
+        return payload
+
+    def _recovery_record(self, record_id: str, query: dict[str, list[str]]) -> dict[str, Any]:
+        with self._db() as database, database.session() as session:
+            payload = RecoveryRepository(session).record_detail(
+                record_id, run_id=_query_one(query, "run_id")
+            )
+        if payload is None:
+            raise ApiError(404, "unknown_recovery_record", f"no recovery record {record_id!r}")
+        return payload
+
+    def _recovery_providers(self) -> dict[str, Any]:
+        from exam_engine.recovery.archives import load_archive_specs
+        from exam_engine.recovery.crawl4ai_adapter import Crawl4AIHealth
+        from exam_engine.recovery.providers import provider_descriptions
+
+        rows = provider_descriptions(self.settings.tutor)
+        rows.append(
+            {
+                "name": "official_archive",
+                "available": bool(load_archive_specs()),
+                "configured": bool(load_archive_specs()),
+                "kind": "official_media_archive",
+                "detail": (
+                    "Configured official WordPress media archives; "
+                    "PDFs are retrieved separately."
+                ),
+            }
+        )
+        rows.append(
+            {
+                "name": "crawl4ai",
+                "available": Crawl4AIHealth.quick_status().get("installed"),
+                "configured": True,
+                "kind": "browser_crawler",
+                "detail": "Crawl4AI renders HTML; it is not a search engine.",
+            }
+        )
+        return {
+            "providers": rows,
+            "total": len(rows),
+            "official_archives": [spec.status() for spec in load_archive_specs()],
+            "crawl4ai": Crawl4AIHealth.quick_status(),
+        }
+
+    def _recovery_sources(self, query: dict[str, list[str]]) -> dict[str, Any]:
+        limit = _query_int(query, "limit", 200, minimum=1, maximum=2000)
+        with self._db() as database, database.session() as session:
+            rows = RecoveryRepository(session).list_sources(
+                _query_one(query, "run_id"),
+                course_id=_query_one(query, "course"),
+                limit=limit,
+            )
+        return {"sources": rows, "total": len(rows)}
+
+    def _recovery_issues(self, query: dict[str, list[str]]) -> dict[str, Any]:
+        limit = _query_int(query, "limit", 100, minimum=1, maximum=1000)
+        offset = _query_int(query, "offset", 0, maximum=100000)
+        with self._db() as database, database.session() as session:
+            rows = RecoveryRepository(session).list_issues(
+                run_id=_query_one(query, "run_id"),
+                course_id=_query_one(query, "course"),
+                severity=_query_one(query, "severity"),
+                limit=limit,
+                offset=offset,
+            )
+        return {"issues": rows, "total": len(rows), "limit": limit, "offset": offset}
+
+    def _recovery_run_status(self, run_id: str) -> dict[str, Any]:
+        with self._db() as database, database.session() as session:
+            repo = RecoveryRepository(session)
+            run = repo.get_run(run_id)
+            if run is None:
+                raise ApiError(404, "unknown_recovery_run", f"no recovery run {run_id!r}")
+            return {"run": run, "courses": repo.list_courses(run_id)}
+
+    def _recovery_export(self, course_id: str, query: dict[str, list[str]]) -> dict[str, Any]:
+        with self._db() as database, database.session() as session:
+            rows = RecoveryRepository(session).release_records(
+                course_id, run_id=_query_one(query, "run_id")
+            )
+        return {"course_id": course_id, "released_records": rows, "total": len(rows)}
+
+    def _recovery_run(self, body: dict[str, Any]) -> ApiResponse:
+        root = body.get("root") or "datasets"
+        if not isinstance(root, str):
+            raise ApiError(400, "invalid_request", "root must be a string")
+        csv_path = body.get("csv_path")
+        if csv_path is not None and not isinstance(csv_path, str):
+            raise ApiError(400, "invalid_request", "csv_path must be a string")
+        course_ids = body.get("course_ids") or []
+        category_ids = body.get("category_ids") or []
+        if not isinstance(course_ids, list) or not all(
+            isinstance(item, str) for item in course_ids
+        ):
+            raise ApiError(400, "invalid_request", "course_ids must be a list of strings")
+        if not isinstance(category_ids, list) or not all(
+            isinstance(item, str) for item in category_ids
+        ):
+            raise ApiError(400, "invalid_request", "category_ids must be a list of strings")
+        mode = str(body.get("mode") or "auto")
+        if mode not in {"auto", "review", "audit"}:
+            raise ApiError(400, "invalid_request", "mode must be auto, review or audit")
+        workflow = str(body.get("workflow") or "full")
+        if workflow not in {"inventory", "analyze", "recover", "verify", "reconstruct", "full"}:
+            raise ApiError(
+                400,
+                "invalid_request",
+                "workflow must be inventory, analyze, recover, verify, reconstruct or full",
+            )
+        with self._db() as database:
+            result = DatasetRecoveryService(database, self.settings).analyze(
+                root,
+                course_ids=course_ids or None,
+                category_ids=category_ids or None,
+                mode=mode,
+                workflow=workflow,
+                dry_run=bool(body.get("dry_run", True)),
+                use_web=bool(body.get("use_web", False)),
+                use_model=bool(body.get("use_model", False)),
+                provider=str(body.get("provider") or "auto"),
+                fetch_sources=bool(body.get("fetch_sources", False)),
+                crawl_engine=str(body.get("crawl_engine") or "crawl4ai"),
+                retrieval_limit=max(0, min(int(body.get("retrieval_limit", 3)), 8)),
+                retrieval_follow_links=bool(body.get("retrieval_follow_links", True)),
+                retry_failed=bool(body.get("retry_failed", False)),
+                web_limit=max(0, int(body.get("web_limit", 0))),
+                source_limit=max(0, int(body.get("source_limit", 0))),
+                model_limit=max(0, int(body.get("model_limit", 0))),
+                run_id=body.get("run_id") if isinstance(body.get("run_id"), str) else None,
+                incremental=bool(body.get("incremental", False)),
+                csv_path=csv_path,
+                course_id=(
+                    body.get("course_id") if isinstance(body.get("course_id"), str) else None
+                ),
+                course_name=(
+                    body.get("course_name") if isinstance(body.get("course_name"), str) else None
+                ),
+                course_code=(
+                    body.get("course_code") if isinstance(body.get("course_code"), str) else None
+                ),
+                category_id=str(body.get("category_id") or "custom"),
+            )
+        return ApiResponse(200, result.as_dict(include_courses=True))
+
+    def _recovery_crawl(self, body: dict[str, Any]) -> ApiResponse:
+        url = body.get("url")
+        if not isinstance(url, str) or not url.startswith(("http://", "https://")):
+            raise ApiError(400, "invalid_request", "url must be a public http(s) URL")
+        from exam_engine.recovery.crawl4ai_adapter import Crawl4AIFetcher
+
+        fetcher = Crawl4AIFetcher(timeout=float(body.get("timeout") or 30.0))
+        try:
+            page = fetcher.crawl(url)
+        finally:
+            fetcher.close()
+        return ApiResponse(
+            200,
+            {
+                "url": page.url,
+                "final_url": page.final_url,
+                "status_code": page.status_code,
+                "title": page.title,
+                "canonical_url": page.canonical_url,
+                "markdown": page.markdown[:50000],
+                "links": page.links[:200],
+                "tables": page.tables[:20],
+                "metadata": page.metadata,
+                "elapsed_ms": page.elapsed_ms,
+            },
+        )
+
+    def _recovery_review(self, body: dict[str, Any]) -> ApiResponse:
+        repair_id = body.get("repair_id")
+        if not isinstance(repair_id, int):
+            raise ApiError(400, "invalid_request", "repair_id must be an integer")
+        status = body.get("status")
+        if status not in {"approved", "rejected"}:
+            raise ApiError(400, "invalid_request", "status must be approved or rejected")
+        reviewer = body.get("reviewer") or "dashboard-user"
+        if not isinstance(reviewer, str) or len(reviewer) > 80:
+            raise ApiError(400, "invalid_request", "reviewer must be at most 80 characters")
+        note = body.get("note")
+        if note is not None and not isinstance(note, str):
+            raise ApiError(400, "invalid_request", "note must be a string")
+        with self._db() as database, database.transaction() as session:
+            payload = RecoveryRepository(session).review_repair(
+                repair_id,
+                status=status,
+                reviewer=reviewer,
+                note=note,
+                edited_after=body.get("edited_after"),
+            )
+        if payload is None:
+            raise ApiError(404, "unknown_recovery_repair", f"no repair {repair_id!r}")
+        return ApiResponse(200, {"record": payload})
+
+    def _recovery_rollback(self, body: dict[str, Any]) -> ApiResponse:
+        run_id = body.get("run_id")
+        if not isinstance(run_id, str) or not run_id:
+            raise ApiError(400, "invalid_request", "run_id is required")
+        if body.get("confirm") is not True:
+            raise ApiError(400, "confirmation_required", "set confirm=true to roll back")
+        with self._db() as database, database.transaction() as session:
+            ok = RecoveryRepository(session).rollback(run_id)
+        if not ok:
+            raise ApiError(404, "unknown_recovery_run", f"no recovery run {run_id!r}")
+        return ApiResponse(200, {"run_id": run_id, "status": "rolled_back"})
 
     # -- course/document writes -------------------------------------------
     def _create_course(self, body: dict[str, Any]) -> ApiResponse:

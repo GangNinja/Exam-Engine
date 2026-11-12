@@ -1151,6 +1151,14 @@ def test_assessment_change_reuses_phase7_and_phase8_outputs() -> None:
         assert changes[0].concept_ids == [assessment.concept_id]
         assert changes[0].review_required is True
         assert changes[0].earlier is not None and changes[0].later is not None
+        assert changes[0].earlier.period or changes[0].earlier.date_to
+        assert "earlier window" in changes[0].explanation.lower()
+        assert "later window" in changes[0].explanation.lower()
+        assert "percentage points" in changes[0].explanation
+        assert changes[0].change_summary
+        assert "percentage points" in changes[0].change_summary
+        assert changes[0].change_summary != changes[0].explanation
+        assert not any("max type share delta" in item for item in changes[0].evidence)
         assert "share" in " ".join(assessment.reasons)
     finally:
         database.close()

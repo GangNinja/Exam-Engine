@@ -151,7 +151,7 @@ function renderSyllabi(course) {
 
 function renderUpload(ctx) {
   const status = h("div", { class: "form-status", role: "status", "aria-live": "polite" });
-  const fileInput = inputControl({ name: "file", type: "file", required: true, id: "upload-file" });
+  const fileInput = inputControl({ name: "file", type: "file", id: "upload-file" });
   const titleInput = inputControl({ name: "title", id: "upload-title", placeholder: "Optional display title" });
   const kindSelect = selectControl(DOCUMENT_KINDS, { name: "kind", value: "question_paper", id: "upload-kind" });
   const sourceInput = inputControl({
@@ -232,16 +232,18 @@ function renderUpload(ctx) {
     } catch (error) {
       if (error?.name === "AbortError") return;
       status.dataset.tone = "negative";
-      status.replaceChildren(
-        h("p", { text: error?.message || "The upload failed." }),
-        error?.detail?.result?.errors
-          ? h(
-              "ul",
-              { class: "uncertainty-list" },
-              ...error.detail.result.errors.map((item) => h("li", { text: `${item.code}: ${item.message}` })),
-            )
-          : null,
-      );
+      const errorDetails = error?.detail?.result?.errors;
+      const children = [h("p", { text: error?.message || "The upload failed." })];
+      if (Array.isArray(errorDetails) && errorDetails.length) {
+        children.push(
+          h(
+            "ul",
+            { class: "uncertainty-list" },
+            ...errorDetails.map((item) => h("li", { text: `${item.code}: ${item.message}` })),
+          ),
+        );
+      }
+      status.replaceChildren(...children);
     } finally {
       submit.disabled = false;
     }

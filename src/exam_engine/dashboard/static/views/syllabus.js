@@ -146,7 +146,7 @@ function drawSyllabus(ctx, payload) {
           h(
             "span",
             { class: "unit-index-marker", "aria-hidden": "true" },
-            String(index + 1).padStart(2, "0"),
+            unitBadge(unit, index),
           ),
           h(
             "span",
@@ -341,7 +341,7 @@ function drawSyllabus(ctx, payload) {
               "a",
               {
                 class: "related-question",
-                href: `#/exams/questions?course=${encodeURIComponent(ctx.courseId)}&unit_id=${encodeURIComponent(unit.unit_id)}&search=${encodeURIComponent(question.source_question_id || "")}`,
+                href: `#/exams/questions?course=${encodeURIComponent(ctx.courseId)}&unit_id=${encodeURIComponent(unit.unit_id)}&question_id=${encodeURIComponent(question.question_id)}&search=${encodeURIComponent(question.source_question_id || question.question_id || "")}`,
               },
               h(
                 "span",
@@ -442,6 +442,16 @@ function drawSyllabus(ctx, payload) {
 
 function sourceFact(label, value) {
   return h("div", {}, h("dt", { text: label }), h("dd", { text: value }));
+}
+
+// The outline marker must show the stored unit identity, not the row's position
+// in an outline that can start at Unit 2 or skip a section.
+function unitBadge(unit, index) {
+  const labelled = String(unit?.unit_label || "").match(/\b(?:unit|section)\s+(\d{1,2})\b/i);
+  if (labelled) return labelled[1].padStart(2, "0");
+  const number = Number(unit?.unit_number);
+  if (Number.isInteger(number) && number > 0 && number < 100) return String(number).padStart(2, "0");
+  return String(index + 1).padStart(2, "0");
 }
 
 function compact(value, max) {

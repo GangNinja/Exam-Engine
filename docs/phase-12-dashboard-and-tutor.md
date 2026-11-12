@@ -2,7 +2,8 @@
 
 A local educational-intelligence workspace over the Phase 1–11 services, a
 framework-free browser client, vendored Hairline illustrations, and an original
-animated tutor that explains only what the stored corpus can support.
+animated tutor that combines stored corpus evidence, cited web sources and an
+optional local model, with an extractive fallback.
 
 **Status:** complete for the software deliverables described here. The dashboard
 starts, every workspace reads and writes through the existing service layer, the
@@ -10,8 +11,8 @@ production package contains its assets, and all Python and Node checks pass.
 Practice now includes local answer checks, concept-expanding batches and an
 explicit Draft/approve review flow. The limitations in §13 are real: answer checks
 are lexical study feedback rather than an examination grade, and there is no
-authentication, forecasting, automated browser test suite or labelled real-world
-accuracy validation. No educational-accuracy claim is made.
+authentication, forecasting, a full automated browser E2E suite or labelled
+real-world accuracy validation. No educational-accuracy claim is made.
 
 ---
 
@@ -35,7 +36,8 @@ Two constraints shaped the design:
    same services the CLI calls, through a thin adapter.
 
 The result is a Python standard-library HTTP server plus framework-free ES
-modules. There is no bundler, no CDN, no telemetry and no runtime network access.
+modules. There is no bundler, no CDN and no telemetry. The dashboard itself uses
+loopback; optional web-search and model endpoints are described in §8.
 
 ---
 
@@ -50,7 +52,9 @@ src/exam_engine/
     errors.py             domain exception -> stable JSON error mapping
     jobs.py               bounded in-process job runner + de-duplication
     server.py             threading HTTP server, static host, CSP, same-origin
-    tutor.py              course-scoped extractive tutor + capability report
+    tutor.py              course-scoped AI tutor, grounded fallback + capability report
+    tutor_ai.py           local Ollama / OpenAI-compatible model adapter
+    websearch.py          optional Exa and keyless Wikipedia retrieval
     static/
       index.html          shell, skip link, CSP-compatible module entry
       app.js              hash router, course context, theme, toasts
@@ -118,7 +122,8 @@ All routes are course-scoped beneath `/api/courses/{course_id}` unless stated.
 | GET | `/api/courses/{id}/misconceptions` | Phase 11 records |
 | POST | `/api/courses/{id}/misconceptions/analyse` | misconception mining |
 | GET | `/api/courses/{id}/tutor/context` | concepts available to the tutor |
-| POST | `/api/courses/{id}/tutor/ask` | grounded explanation |
+| POST | `/api/courses/{id}/tutor/ask` | grounded or model-assisted explanation |
+| POST | `/api/courses/{id}/tutor/ask/stream` | the same tutor response over server-sent events, with status and answer progress |
 | POST | `/api/courses/{id}/analysis/{kind}` | background job: nlp, understanding, graph, prerequisites |
 | GET | `/api/jobs`, `/api/jobs/{job_id}` | job polling |
 
@@ -126,6 +131,13 @@ Errors use one envelope (`error.code`, `error.message`, `error.detail`,
 `request_id`). Domain exceptions map to 400/404/409/422; unexpected exceptions
 become a 500 without internal detail. Every response carries security headers and
 a request id.
+
+The streaming tutor route uses `text/event-stream` with `status`, `answer`,
+`heartbeat`, `result` and `error` events. `answer` events contain decoded
+plain-text deltas from the structured `answer` field; raw model JSON is never
+rendered. The final `result` event is the complete validated tutor payload, so a
+client can replace its preview with the normal sections, citations, warnings and
+refusal states. `/tutor/ask` remains the non-streaming contract.
 
 ### 2.2 A real integration defect found and fixed
 
@@ -189,7 +201,7 @@ The client is a hash-routed single-page workspace with six areas:
 | Analysis | Phase 4 analytics, Phase 7 coverage, Phase 8 Exam DNA, Phase 9 evolution, Phase 5 graph |
 | Learning | graph/neighborhood, prerequisite candidates, learning path |
 | Practice | generation scope, formats, concept-expanding batch creation, question detail, local answer checks, Draft/approve/reject decisions, Phase 11 mutation/adversarial generation |
-| Tutor | animated avatar, grounded Q&A, concept scope, capability table, practice generation |
+| Tutor | prominent ask panel, compact animated avatar, concept scope, model/web status, citations, capability table and practice generation |
 
 Design decisions:
 
@@ -222,12 +234,25 @@ similarity decision rather than padded, and a duplicate that a spare concept fil
 does not by itself turn an otherwise complete batch into `partial`. If the
 syllabus has too few grounded concepts, the batch still reports the shortfall.
 
+The Practice starting concept defaults to **Random concept from this syllabus**,
+and every request carries a fresh seed. Short-answer generation can choose among
+grounded wording variants, so a repeat does not have to reuse the same prompt.
+Generated items remain **Draft** until a human approves them; the answer key is
+kept behind a closed **Show answer** disclosure.
+A successful batch scopes the review queue to that batch so earlier questions do
+not look like new output; **View all stored questions** restores the full queue.
+
 Each stored card has a `Check your answer` disclosure. Multiple-choice answers are
-compared with the stored option key. Written answers are checked locally against
-the stored reference and the concept label's key aspects, returning a coverage
-score, matched/missing terms, an expected-answer outline and explicit limitations;
-the route caps answers at 4,000 characters and persists no attempt. The UI calls
-this a "match" and a study aid, never an examination mark.
+compared with the stored option key. Written answers are checked locally against a
+stored outline built from the question's solution steps, then syllabus facets and
+the stored reference as fallbacks. The response separates fully covered, partly
+covered and missing key ideas, shows which words/phrases are still absent, and
+returns explicit limitations; it does not return marks or an awarded score. A
+small fixed set of regular/irregular plural forms and common synonyms is matched
+lexically; it does not infer meaning from arbitrary paraphrases. The route caps
+answers at 4,000 characters and persists no attempt. The UI calls this a **local
+coverage check**, never an examination grade, and labels the outline as stored
+review material rather than a marking scheme.
 
 `pending_review` is surfaced as `Draft` in the review queue and cards. A Draft has
 a quick Approve action plus explicit Approve/Reject/Save-status controls; every
@@ -338,34 +363,41 @@ transport/HTTP failure. It does not invent an assessment.
 
 ---
 
-## 7. Tutor behaviour
+## 7. Tutor behaviour and model path
 
-The tutor is **extractive and course-scoped**, not a language model. It reuses:
+The tutor is **course-scoped**. It resolves the question against stored concepts,
+then asks a local Ollama model (or an explicitly configured OpenAI-compatible
+endpoint) to answer using:
 
-| Capability | Source |
+| Context | Source |
 |---|---|
 | Concept resolution and syllabus placement | Phase 2 concepts, Phase 5 graph |
 | Coverage status and mapped-question evidence | Phase 7 `CoverageService` |
 | Question locators, marks and review state | Phase 3 mappings, Phase 1 storage |
 | Prerequisite path | Phase 6 `LearningPathService` |
 | Practice generation | Phase 10 generation scope and service |
+| Live sources | Optional Exa or keyless Wikipedia search with URLs |
 
-Answers have a status (`answered`, `insufficient_evidence`), a state, sections
-with headings and citations, related concepts and, where applicable, a learning
-path. "Cannot answer" is a first-class result: ambiguous questions return
-suggested concepts instead of guessing, and a concept without sufficient evidence
-says so.
+The model must return a JSON object with `answer`, `key_points`, citation IDs,
+`confidence` and follow-up questions. The service validates IDs against the
+supplied stored/web citations, rejects invented IDs and labels low confidence. If
+the model is unavailable or fails, the extractive path composes a cited summary
+from the same stored records. Answers use a status (`answered`,
+`insufficient_evidence`), a presentation state, sections, citations and explicit
+limitations; ambiguous questions return suggested concepts rather than a guess.
 
 Capability report (also exposed at `/api/capabilities`):
 
 | Capability | Available | Note |
 |---|---|---|
-| Evidence summaries | yes | syllabus coverage, mapped questions, graph metadata |
+| Grounded explanations | yes | local/configured model with stored evidence; extractive fallback |
 | Concept lookup | yes | selected course only |
 | Prerequisite paths | yes | stored, reviewable relationships |
-| Practice generation | yes | delegates to Phase 10; batches can expand across in-scope concepts |
+| Practice generation | yes | Phase 10; fast deterministic grounded template by default, with an opt-in OpenAI-compatible provider |
 | Local answer checks | yes | stored practice only; exact MCQ key and lexical free-text coverage, never an examination grade |
-| Open conversational reasoning | **no** | no model is bundled or called |
+| Open-ended conversation | yes when a model is available | no model call is made when the provider is off; the extractive fallback remains |
+| Live web sources | yes unless disabled | Exa when configured, otherwise Wikipedia; links are shown |
+| Evidence-based exam focus | yes when a model is available | grounded in stored coverage and recurrence; never a forecast |
 | Forecasting | **no** | reports describe the available corpus; they do not predict future papers |
 
 ---
@@ -383,11 +415,18 @@ Capability report (also exposed at `/api/capabilities`):
   known content types and no directory listing. API bodies are size-limited;
   uploads go through the Phase 1 validator.
 * User content is never inserted as HTML.
-* No third-party requests: fonts, scripts, charts and illustrations are local.
-  No analytics, telemetry or external provider is contacted by the dashboard.
+* Fonts, scripts, charts and illustrations are local. The dashboard API stays on
+  loopback, and there is no analytics or telemetry.
+* The tutor may call the public Wikipedia search/summary APIs when web search is
+  enabled (the default), or Exa when `EXA_API_KEY` is set. It may call a local
+  Ollama model on loopback, or an explicitly configured OpenAI-compatible endpoint.
+  Web search can be disabled with `EXAM_ENGINE_TUTOR_WEB_SEARCH=off`.
+* The tutor sends the selected course, the user's question and selected evidence
+  snippets to the configured model. Keep private course material on the local
+  model; do not configure a remote endpoint without permission.
 * Errors expose a stable code and message, not tracebacks or file paths.
-* The tutor and illustrations receive no data beyond the selected course and the
-  user's question.
+* The illustrations receive no data beyond the selected course and the user's
+  question.
 
 ---
 
@@ -397,20 +436,21 @@ Capability report (also exposed at `/api/capabilities`):
 
 | Command | Result |
 |---|---|
-| `python -m pytest` | **620 passed** (includes later Practice answer-check, batch-expansion and review regressions) |
-| `cd frontend && npm test` | **16 passed**, 0 failed (Node 22 built-in runner) |
+| `python -m pytest` | **628 passed** (includes later Practice answer-check, batch-expansion, wording-variation, review, NLP status and tutor-streaming regressions) |
+| `cd frontend && npm test` | **17 passed**, 0 failed (Node 22 built-in runner) |
+| `cd frontend && npm run test:browser` | **1 passed**, 0 failed (Playwright Core with installed Chrome) |
 | `python -m ruff check src tests tools` | **All checks passed** |
-| `python -m ruff format --check src tests tools` | **175 files already formatted** |
-| `python -m mypy` | **Success: no issues found in 131 source files** |
+| `python -m ruff format --check src tests tools` | **177 files already formatted** |
+| `python -m mypy` | **Success: no issues found in 133 source files** |
 | `cd frontend && npm run check:assets` | 18 first-party modules, 6 local references, Hairline 0.5.1 (MIT) |
 | `python -m pip wheel . -w <dir> --no-deps` | succeeded; 155 files, **26 files under `dashboard/`** (plus `cli_dashboard.py`), including 7 views and vendored Hairline |
 
 `tests/test_dashboard.py` covers: health/capability honesty; course scope and
 document isolation; real analytics/coverage/Exam DNA/evolution reads; the
 generation-scope fix; tutor grounding, refusal and unavailable capabilities;
-background job execution; upload validation and cross-course rejection; course
-creation/duplicate offerings; HTTP headers, CSP, static assets and foreign-origin
-rejection.
+tutor stream escape extraction and the SSE HTTP response; background job
+execution; upload validation and cross-course rejection; course creation/duplicate
+offerings; HTTP headers, CSP, static assets and foreign-origin rejection.
 
 `tests/test_dashboard.py` also covers the Phase 11 mutation/adversarial routes and
 cross-course rejection; `tests/test_advanced.py` covers the rephrase regression and
@@ -423,7 +463,8 @@ The frontend tests cover: the pure tutor state machine, coverage labels/tones,
 segment and bar chart data (including missing denominators and zero shares),
 formatting, truncation notes, API response parsing, avatar state/caption/cleanup,
 static HTML/CSP constraints, reduced-motion declarations, and the Hairline pin,
-provenance and local-reference checks.
+provenance and local-reference checks. The separate browser smoke test (§9.5)
+runs the real server and asset code against a disposable seeded database.
 
 No existing test was deleted, skipped or weakened.
 
@@ -463,8 +504,8 @@ Exercised against an ephemeral demo database built from the synthetic sample
 10. Theme toggle switched light/dark tokens; narrow viewport removed horizontal
     overflow and collapsed the sidebar; console showed no errors.
 
-This was manual verification, not an automated browser suite. No competing
-browser framework was added.
+This initial pass was manual verification rather than an automated browser
+suite. A narrow smoke test now supplements it (§9.5).
 
 ### 9.3 Practice hardening after the initial dashboard pass
 
@@ -495,11 +536,41 @@ targeted the generation and review paths that were still confusing:
 
 Verification for this pass: 66 targeted Python tests (dashboard and generation),
 Ruff lint, parsing of every browser module, `npm run check:assets` over 18
-first-party modules, 16/16 frontend tests, and an 18/18-route Chromium harness with
+first-party modules, 17/17 frontend tests, and an 18/18-route Chromium harness with
 zero timeouts, console errors or horizontal-overflow findings. The live Practice
 view loaded the stored queue, displayed Draft/Approve, and completed a real
-`Check your answer` request without a console or network error. These are local
-verification runs, not a committed browser E2E suite.
+`Check your answer` request without a console or network error. These were local
+verification runs; the committed browser coverage is the focused smoke test in
+§9.5, not a full E2E suite.
+
+### 9.4 Tutor streaming verification
+
+A live local-model check exercised the new route with Ollama `qwen3:8b` and the
+stored JEE Advanced maths corpus. Stage events arrived immediately
+(`stored_evidence`, `web_search`, `model`), heartbeats continued while the model
+worked, and decoded answer deltas began at about 62 seconds in a direct client
+check; the final validated response arrived at about 120 seconds. In Chromium,
+the pending message showed the current stage, a one-second elapsed timer and a
+live plain-text preview at 65 seconds, then was replaced by the normal structured
+message with 3 sections and 3 citations. The browser console had no errors. These
+timings are observations, not performance guarantees.
+
+### 9.5 Automated browser smoke test
+
+`cd frontend && npm run test:browser` exercises the real Practice UI and backend
+with Playwright Core and an installed Chrome or Edge executable; it does not
+download a browser or run under normal `npm test`. The test seeds a temporary
+SQLite database from the synthetic sample via `tools/seed_dashboard_smoke.py`,
+starts the dashboard on an available loopback port, and removes both afterwards.
+It never opens the operator's `exam_engine.db`.
+
+The flow verifies that a pending short-answer question renders, submits a weak
+answer and receives a local lexical-coverage response with the "not a grade"
+label, approves the Draft through the UI, confirms the review response and then
+reloads the page to verify the approved state was persisted. Browser page errors
+and console errors fail the test. `BROWSER_EXECUTABLE` overrides browser
+detection. Coverage is intentionally narrow: this is not a full navigation or
+accessibility suite.
 
 ---
 
@@ -519,7 +590,7 @@ no compression. Demo corpus: 2 courses / 7 documents. Times are wall-clock from
 | `GET …/generation/options` | 33.0 ms | 39.8 ms | 9.0 KB |
 | `GET …/graph?limit=400` | 23.4 ms | 25.5 ms | 74.5 KB |
 | `GET …/tutor/context` | 28.0 ms | 29.1 ms | 3.1 KB |
-| `POST …/tutor/ask` | 29.9 ms (5 runs) | — | 2.9 KB |
+| `POST …/tutor/ask` | 29.9 ms (5 runs, extractive fallback) | — | 2.9 KB |
 
 * Static client: **449 KiB** across 17 requests, of which 217 KiB is the vendored
   Hairline module loaded only on illustration pages. Median asset response 1.7 ms;
@@ -531,8 +602,11 @@ no compression. Demo corpus: 2 courses / 7 documents. Times are wall-clock from
 * No memory profile was captured; the server is a single process with a two-worker
   job pool and per-request SQLite connections that are closed in `finally`.
 
-These numbers describe a synthetic local corpus and are not a production
-throughput claim. There is no HTTP compression, caching layer or CDN.
+These numbers describe the extractive fallback on a synthetic local corpus and
+are not a production throughput claim. A real `qwen3:8b` answer took 116.3 s on
+the development machine; the UI timeout is 240 s. Local-model latency is
+hardware-dependent and is not represented in the table. There is no HTTP
+compression, caching layer or CDN.
 
 ---
 
@@ -557,13 +631,15 @@ verification:
 
 Added:
 
-* `src/exam_engine/dashboard/{__init__,api,errors,jobs,server,tutor}.py`
+* `src/exam_engine/dashboard/{__init__,api,errors,jobs,server,tutor,tutor_ai,websearch}.py`
 * `src/exam_engine/dashboard/static/**` (shell, modules, styles, vendor)
 * `src/exam_engine/cli_dashboard.py`
 * `tests/test_dashboard.py`
 * `frontend/{package.json,package-lock.json,README.md}`
 * `frontend/scripts/{sync-hairline,check-assets}.mjs`
 * `frontend/tests/{ui-state,api-client,tutor-avatar,static-assets}.test.mjs`
+* `frontend/browser-tests/practice-smoke.mjs`
+* `tools/seed_dashboard_smoke.py`
 * this report
 
 Modified:
@@ -590,17 +666,20 @@ models, dashboard API/tutor, Practice and workspace views, styles and tests.
    per-user separation because there are no users.
 2. **Answer checks are local and lexical, not an examination grade.** MCQ
    choices are compared with the stored key; free text is scored by term and
-   expected-point coverage, so a correct paraphrase can be under-credited and
-   keyword-heavy prose over-credited. Attempts are not stored, and only stored
-   generated questions can be checked.
-3. **No conversational reasoning or forecasting.** The tutor is retrieval, not a
-   language model, and reports describe the available corpus rather than
-   predicting future papers.
-4. **The tutor is retrieval, not generation.** It quotes and organises stored
-   evidence; it cannot answer outside the analysed corpus, and ambiguous concept
-   matches produce suggestions rather than a guess. Concept resolution inherits
-   Phase 2/5 identity quality.
-5. **No automated browser E2E suite.** Browser behaviour was verified manually.
+   expected-point coverage. Regular/listed irregular plurals and a small fixed
+   set of common synonyms are normalized, but other paraphrases can still be
+   under-credited and keyword-heavy prose over-credited. Attempts are not
+   stored, and only stored generated questions can be checked.
+3. **No forecasting or autonomous approval.** Open-ended conversation is
+   available when a model is configured, but reports describe only the available
+   corpus and never predict a future paper.
+4. **Model answers can be wrong or slow.** The tutor prefers a local Ollama
+   model; its answers may use general subject knowledge when stored and web
+   sources are thin, and a local answer can take up to the configured timeout
+   (240 seconds by default). The extractive fallback is bounded by the analysed
+   corpus. Concept resolution inherits Phase 2/5 identity quality.
+5. **Browser coverage is a narrow smoke test, not a full E2E suite.** It covers
+   the Practice answer-check and Draft approval flows against a seeded database.
    Accessibility was checked structurally and by keyboard/theme review, not by a
    formal WCAG audit or screen-reader matrix.
 6. **Jobs are in-process and ephemeral.** A restart loses job history (not the
@@ -638,8 +717,8 @@ should:
    corpus; revisit pagination, caching and job progress if latency grows.
 4. Decide whether authentication is required for the intended deployment before
    any remote hosting; the current dashboard must not be presented as multi-user.
-5. Add a browser test harness only if it can reuse the existing static contracts
-   without duplicating the Node suite.
+5. Expand the focused browser smoke test only where it can reuse the existing
+   static contracts without duplicating the Node suite.
 
 ---
 
@@ -659,6 +738,7 @@ python -m exam_engine dashboard --port 8765
 python -m pytest
 python -m ruff check src tests
 cd frontend && npm ci && npm run check:assets && npm test
+cd frontend && npm run test:browser                        # Chrome/Edge required
 ```
 
 The dashboard prints its URL and database path, serves only loopback by default,

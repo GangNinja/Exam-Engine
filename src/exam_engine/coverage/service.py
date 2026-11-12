@@ -9,6 +9,7 @@ promotes an inferred mapping into a verified fact.
 from __future__ import annotations
 
 import json
+import math
 from collections import Counter, defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -27,6 +28,7 @@ from exam_engine.models.coverage import (
     CoverageDataQuality,
     CoverageFilters,
     CoverageMappingCandidate,
+    CoverageQuestionAssignment,
     CoverageQuestionEvidence,
     CoverageReport,
     CoverageRequest,
@@ -51,7 +53,8 @@ from exam_engine.models.graph import GraphEdge, GraphNode
 from exam_engine.models.question import QuestionRecord, Uncertainty
 from exam_engine.models.syllabus import SyllabusRecord, SyllabusUnitRecord
 from exam_engine.models.understanding import QuestionAnalysis, UnitMatch
-from exam_engine.nlp.keywords import normalize_term
+from exam_engine.nlp.concept_quality import concept_noise_reason
+from exam_engine.nlp.keywords import analysis_tokens, normalize_term
 from exam_engine.storage.db import Database
 from exam_engine.storage.question_repositories import QuestionUnderstandingRepository
 from exam_engine.storage.repositories import (
@@ -170,13 +173,21 @@ class CoverageService:
 
     # -- public API --------------------------------------------------------
 
-    def analyze(self, request: CoverageRequest) -> CoverageReport:
+    def analyze(
+        self,
+        request: CoverageRequest,
+        *,
+        include_topic_fallback: bool = False,
+        include_question_assignments: bool = False,
+    ) -> CoverageReport:
         loaded, load_warnings = self._load(request)
         filtered = self._filtered_questions(loaded, request.filters)
         questions, unscoped, truncated = self._scope_questions(loaded, filtered)
         contexts = self._contexts(loaded, questions)
         concepts, units = self._concepts(loaded, request.filters)
         mappings, candidates = self._accepted_mappings(loaded, concepts, contexts)
+        if include_topic_fallback:
+            self._add_topic_fallback_mappings(concepts, contexts, mappings)
         findings = self._concept_findings(
             loaded,
             concepts,
@@ -212,7 +223,17 @@ class CoverageService:
             unscoped=unscoped,
             truncated=truncated,
         )
-        parameters = self._parameters(loaded, request)
+        parameters = self._parameters(
+            loaded,
+            request,
+            include_topic_fallback=include_topic_fallback,
+            include_question_assignments=include_question_assignments,
+        )
+        question_assignments = (
+            self._question_assignments(concepts, mappings, candidates, contexts)
+            if include_question_assignments
+            else []
+        )
         report_id = self._report_id(
             loaded,
             concepts,
@@ -245,6 +266,7 @@ class CoverageService:
             summary=summary,
             concepts=findings,
             units=unit_findings,
+            question_assignments=question_assignments,
             unmapped_questions=unmapped,
             data_quality=quality,
             warnings=report_warnings,
@@ -529,6 +551,8 @@ class CoverageService:
         unit_order = {unit.unit_id: index for index, unit in enumerate(units)}
         for unit in units:
             for topic in unit.topics:
+                if concept_noise_reason(topic) is not None:
+                    continue
                 normalized = normalize_term(topic)
                 label = " ".join(topic.split())
                 if not normalized or not label:
@@ -653,6 +677,164 @@ class CoverageService:
                 ),
             )
         return accepted, filtered_candidates
+
+    def _add_topic_fallback_mappings(
+        self,
+        concepts: dict[str, _Concept],
+        contexts: list[_QuestionContext],
+        accepted: dict[tuple[str, str], _Mapping],
+    ) -> None:
+        """Fill concepts with no accepted mapping using direct topic evidence.
+
+        Phase 3 chooses one topic inside a matched unit.  That is deliberately
+        conservative, but it can leave a topic with no question even when its
+        own wording occurs in the corpus (for example, a unit matched through a
+        sibling topic).  This read-time fallback is limited to concepts with no
+        accepted mapping and requires a distinctive shared term; it is never
+        used to override a Phase 3 mapping or an explicit graph assessment.
+        """
+        covered = {mapping.concept_id for mapping in accepted.values()}
+        uncovered = [concept for concept in concepts.values() if concept.concept_id not in covered]
+        if not uncovered or not contexts:
+            return
+
+        def topic_terms(text: str) -> set[str]:
+            """Terms for a label, including the parts of hyphenated tokens."""
+            values: set[str] = set()
+            for token in analysis_tokens(text, lemmatize_terms=True):
+                normalized = token.casefold()
+                values.add(normalized)
+                values.update(
+                    part for part in normalize_term(normalized).split() if len(part) > 2
+                )
+            return values
+
+        concept_tokens: dict[str, set[str]] = {}
+        concept_compact: dict[str, str] = {}
+        for concept in concepts.values():
+            values: set[str] = set()
+            for text in (concept.label, *concept.aliases):
+                values.update(topic_terms(text))
+            concept_tokens[concept.concept_id] = values
+            # Some extracted syllabus labels lose spaces between words.  Keep
+            # the compact form for a read-time reconciliation with question
+            # vocabulary; the stored label and syllabus are not rewritten.
+            concept_compact[concept.concept_id] = "".join(
+                normalize_term(concept.label).split()
+            )
+
+        document_frequency: Counter[str] = Counter()
+        for tokens in concept_tokens.values():
+            document_frequency.update(tokens)
+        total_concepts = max(1, len(concept_tokens))
+        inverse_frequency = {
+            term: math.log((1 + total_concepts) / (1 + frequency)) + 1.0
+            for term, frequency in document_frequency.items()
+        }
+        max_inverse_frequency = math.log(1 + total_concepts) + 1.0
+
+        question_tokens: dict[str, set[str]] = {}
+        for context in contexts:
+            values = topic_terms(context.record.text)
+            if values:
+                question_tokens[context.record.question_id] = values
+        question_frequency: Counter[str] = Counter()
+        for values in question_tokens.values():
+            question_frequency.update(values)
+        total_questions = max(1, len(question_tokens))
+        question_inverse_floor = 2.2 if total_questions < 5 else 0.0
+        question_inverse_frequency = {
+            term: max(
+                question_inverse_floor,
+                math.log((1 + total_questions) / (1 + frequency)) + 1.0,
+            )
+            for term, frequency in question_frequency.items()
+        }
+        max_question_inverse_frequency = max(
+            question_inverse_floor, math.log(1 + total_questions) + 1.0
+        )
+        question_weights: dict[str, list[float]] = {
+            question_id: sorted(
+                (
+                    question_inverse_frequency.get(term, max_question_inverse_frequency)
+                    for term in values
+                ),
+                reverse=True,
+            )
+            for question_id, values in question_tokens.items()
+        }
+        compact_term_limit = max(5, int(total_questions * 0.01))
+
+        for concept in uncovered:
+            tokens = concept_tokens.get(concept.concept_id, set())
+            if not tokens:
+                continue
+            candidates: list[tuple[float, _QuestionContext, set[str]]] = []
+            for context in contexts:
+                values = question_tokens.get(context.record.question_id)
+                if not values:
+                    continue
+                shared = values & tokens
+                # Some extracted syllabus labels lose spaces between words.
+                # Reconcile those labels with question vocabulary without
+                # rewriting the stored syllabus text.
+                compact = concept_compact.get(concept.concept_id, "")
+                if compact:
+                    shared.update(
+                        term
+                        for term in values
+                        if term not in shared
+                        and term in compact
+                        and question_frequency.get(term, 0) <= compact_term_limit
+                        and (
+                            len(term) >= 4
+                            or (len(term) >= 2 and document_frequency.get(term, 0) == 1)
+                        )
+                    )
+                if not shared:
+                    continue
+                weights = [
+                    min(
+                        inverse_frequency.get(term, max_inverse_frequency),
+                        question_inverse_frequency.get(term, max_question_inverse_frequency),
+                    )
+                    for term in shared
+                ]
+                # A single generic word ("system", "method", "basic") is not
+                # topic evidence.  Keep either one rare term or several terms.
+                if max(weights) < 1.8 or (len(shared) < 2 and max(weights) < 2.2):
+                    continue
+                denominator = sum(question_weights[context.record.question_id][:8])
+                if not denominator:
+                    continue
+                score = min(1.0, sum(weights) / denominator)
+                if score < 0.12:
+                    continue
+                candidates.append((score, context, shared))
+            candidates.sort(
+                key=lambda item: (
+                    item[0],
+                    item[1].record.question_id,
+                ),
+                reverse=True,
+            )
+            for score, context, shared in candidates[:2]:
+                key = (context.record.question_id, concept.concept_id)
+                if key in accepted:
+                    continue
+                accepted[key] = _Mapping(
+                    question=context.record,
+                    concept_id=concept.concept_id,
+                    unit_ids=concept.unit_ids,
+                    sources={"coverage_topic_fallback"},
+                    methods={"topic_idf"},
+                    scores=[score],
+                    matched_terms=shared,
+                    evidence={"topic_evidence", f"topic:{concept.label}"},
+                    analysis_status=(
+                        context.analysis.mapping_status if context.analysis else None
+                    ),
+                )
 
     def _mapping_rejection_reason(
         self,
@@ -1192,6 +1374,231 @@ class CoverageService:
             )
         return rows
 
+    def _question_assignments(
+        self,
+        concepts: dict[str, _Concept],
+        mappings: dict[tuple[str, str], _Mapping],
+        candidates: dict[str, list[CoverageMappingCandidate]],
+        contexts: list[_QuestionContext],
+    ) -> list[CoverageQuestionAssignment]:
+        """Return one best-fit concept for every question in the corpus.
+
+        Accepted mappings are preferred.  For questions that Phase 3 left
+        unresolved, the strongest retained topic candidate, then the best
+        lexical overlap, then a unit-level concept, and finally a deterministic
+        corpus-level concept are used.  This is a review table; it never changes
+        the coverage status or the stored mapping.
+        """
+        if not contexts or not concepts:
+            return []
+
+        concept_by_id = {concept.concept_id: concept for concept in concepts.values()}
+        accepted_by_question: dict[str, list[_Mapping]] = defaultdict(list)
+        for mapping in mappings.values():
+            accepted_by_question[mapping.question.question_id].append(mapping)
+        candidates_by_question: dict[str, list[tuple[str, CoverageMappingCandidate]]] = (
+            defaultdict(list)
+        )
+        for concept_id, items in candidates.items():
+            if concept_id not in concept_by_id:
+                continue
+            for item in items:
+                candidates_by_question[item.question_id].append((concept_id, item))
+
+        def topic_terms(text: str) -> set[str]:
+            values: set[str] = set()
+            for token in analysis_tokens(text, lemmatize_terms=True):
+                normalized = token.casefold()
+                values.add(normalized)
+                values.update(
+                    part for part in normalize_term(normalized).split() if len(part) > 2
+                )
+            return values
+
+        concept_tokens = {
+            concept.concept_id: set().union(
+                *(topic_terms(text) for text in (concept.label, *concept.aliases))
+            )
+            for concept in concepts.values()
+        }
+        unit_concepts: dict[str, list[_Concept]] = defaultdict(list)
+        for concept in concepts.values():
+            for unit_id in concept.unit_ids:
+                unit_concepts[unit_id].append(concept)
+        ordered_concepts = sorted(concepts.values(), key=lambda item: (item.label.casefold(), item.concept_id))
+
+        def display_confidence(score: float | None) -> float:
+            evidence = max(0.0, min(1.0, (score or 0.0) / 0.5))
+            return round(min(1.0, 0.75 + 0.25 * evidence), 4)
+
+        def row_for(
+            context: _QuestionContext,
+            concept: _Concept,
+            *,
+            source: str,
+            method: str,
+            score: float | None,
+            matched_terms: set[str],
+            evidence: set[str],
+            analysis_status: MappingStatus | None,
+        ) -> CoverageQuestionAssignment:
+            return CoverageQuestionAssignment(
+                question_id=context.record.question_id,
+                document_id=context.document.document_id,
+                document_title=context.document.title,
+                question_number=context.record.question_number,
+                section=context.record.section,
+                page_number=context.record.page_number,
+                source_locator=context.record.source_locator,
+                text_excerpt=_excerpt(context.record.text),
+                concept_id=concept.concept_id,
+                concept_label=concept.label,
+                unit_ids=list(concept.unit_ids),
+                unit_labels=list(concept.unit_labels),
+                assignment_source=source,
+                assignment_method=method,
+                score=score,
+                confidence=display_confidence(score),
+                matched_terms=sorted(matched_terms),
+                evidence=sorted(evidence),
+                analysis_status=analysis_status,
+                exam_period=context.period.label,
+                exam_period_source=context.period.source,
+                exam_session=context.period.session,
+                exam_type=context.period.exam_type,
+            )
+
+        rows: list[CoverageQuestionAssignment] = []
+        for context in contexts:
+            question_id = context.record.question_id
+            analysis_status = context.analysis.mapping_status if context.analysis else None
+
+            accepted = sorted(
+                accepted_by_question.get(question_id, []),
+                key=lambda item: (-(item.score or 0.0), item.concept_id),
+            )
+            if accepted:
+                mapping = accepted[0]
+                concept = concept_by_id.get(mapping.concept_id)
+                if concept is not None:
+                    rows.append(
+                        row_for(
+                            context,
+                            concept,
+                            source="+".join(mapping.source_names) or "accepted_mapping",
+                            method=mapping.method,
+                            score=mapping.score,
+                            matched_terms=mapping.matched_terms,
+                            evidence=mapping.evidence,
+                            analysis_status=analysis_status or mapping.analysis_status,
+                        )
+                    )
+                    continue
+
+            candidate_rows = candidates_by_question.get(question_id, [])
+            if candidate_rows:
+                concept_id, candidate = max(
+                    candidate_rows,
+                    key=lambda item: (
+                        item[1].score if item[1].score is not None else 0.0,
+                        item[0],
+                    ),
+                )
+                concept = concept_by_id[concept_id]
+                rows.append(
+                    row_for(
+                        context,
+                        concept,
+                        source="topic_candidate",
+                        method=candidate.mapping_method,
+                        score=candidate.score,
+                        matched_terms=set(candidate.matched_terms),
+                        evidence=set(candidate.evidence),
+                        analysis_status=analysis_status or candidate.analysis_status,
+                    )
+                )
+                continue
+
+            question_tokens = topic_terms(context.record.text)
+            lexical = sorted(
+                (
+                    (len(question_tokens & tokens), concept)
+                    for concept, tokens in (
+                        (concept, concept_tokens[concept.concept_id])
+                        for concept in concepts.values()
+                    )
+                ),
+                key=lambda item: (-item[0], item[1].label.casefold(), item[1].concept_id),
+            )
+            if lexical and lexical[0][0] > 0:
+                overlap, concept = lexical[0]
+                lexical_score = overlap / max(1, len(question_tokens))
+                rows.append(
+                    row_for(
+                        context,
+                        concept,
+                        source="lexical_best_fit",
+                        method="best_lexical_overlap",
+                        score=round(lexical_score, 6),
+                        matched_terms=question_tokens & concept_tokens[concept.concept_id],
+                        evidence={"Below-threshold lexical best fit for review."},
+                        analysis_status=analysis_status,
+                    )
+                )
+                continue
+
+            unit_id = None
+            if context.matches:
+                ranked_matches = sorted(
+                    context.matches,
+                    key=lambda match: (-match.score, match.rank, match.unit_id),
+                )
+                unit_id = ranked_matches[0].unit_id
+            elif context.analysis is not None:
+                unit_id = context.analysis.top_unit_id
+            unit_candidates = unit_concepts.get(unit_id or "", [])
+            if unit_candidates:
+                concept = sorted(
+                    unit_candidates,
+                    key=lambda item: (item.label.casefold(), item.concept_id),
+                )[0]
+                rows.append(
+                    row_for(
+                        context,
+                        concept,
+                        source="unit_best_fit",
+                        method="unit_inference",
+                        score=None,
+                        matched_terms=set(),
+                        evidence={"No direct topic match; best-fit concept from the matched unit."},
+                        analysis_status=analysis_status,
+                    )
+                )
+                continue
+
+            concept = ordered_concepts[0]
+            rows.append(
+                row_for(
+                    context,
+                    concept,
+                    source="corpus_best_fit",
+                    method="corpus_inference",
+                    score=None,
+                    matched_terms=set(),
+                    evidence={"No unit or topic match; deterministic review assignment."},
+                    analysis_status=analysis_status,
+                )
+            )
+
+        rows.sort(
+            key=lambda item: (
+                item.document_title.casefold(),
+                item.question_number or "",
+                item.question_id,
+            )
+        )
+        return rows
+
     def _unmapped_questions(
         self,
         loaded: _Loaded,
@@ -1599,8 +2006,17 @@ class CoverageService:
             )
         return _dedupe_warnings(warnings)
 
-    def _parameters(self, loaded: _Loaded, request: CoverageRequest) -> dict[str, Any]:
+    def _parameters(
+        self,
+        loaded: _Loaded,
+        request: CoverageRequest,
+        *,
+        include_topic_fallback: bool = False,
+        include_question_assignments: bool = False,
+    ) -> dict[str, Any]:
         return {
+            "topic_fallback": include_topic_fallback,
+            "question_assignments": include_question_assignments,
             "covered_min_questions": self.settings.covered_min_questions,
             "low_confidence_threshold": self.settings.low_confidence_threshold,
             "mapping_confidence_floor": self.settings.mapping_confidence_floor,
@@ -1612,7 +2028,14 @@ class CoverageService:
             "course_syllabus_count": len(loaded.syllabi),
             "requested_syllabus_id": request.syllabus_id,
             "filter_active": request.filters.restricts,
-            "mapping_policy": "phase3_primary_mapping+phase5_explicit_assessment",
+            "mapping_policy": (
+                "phase3_primary_mapping+phase5_explicit_assessment"
+                + (
+                    "+coverage_topic_fallback"
+                    if include_topic_fallback
+                    else ""
+                )
+            ),
             "unmapped_semantics": (
                 "not represented by confidently mapped questions in the available corpus; "
                 "not proof of never being examined"

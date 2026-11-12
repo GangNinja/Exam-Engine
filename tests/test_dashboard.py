@@ -23,6 +23,7 @@ from exam_engine.config import Settings
 from exam_engine.dashboard.api import DashboardAPI
 from exam_engine.dashboard.errors import ApiError
 from exam_engine.dashboard.server import create_server
+from exam_engine.dashboard.tutor_ai import _PartialAnswerExtractor
 from exam_engine.graph.service import GraphService
 from exam_engine.ingest.pipeline import IngestionPipeline
 from exam_engine.nlp.service import NlpService
@@ -37,7 +38,12 @@ PHY = "demo-phy101-2024-v1"
 def corpus(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Settings]:
     directory = tmp_path_factory.mktemp("phase12-dashboard")
     path = directory / "dashboard.db"
-    settings = Settings.from_env().with_db(path)
+    settings = Settings.from_env(
+        {
+            "EXAM_ENGINE_TUTOR_PROVIDER": "off",
+            "EXAM_ENGINE_TUTOR_WEB_SEARCH": "off",
+        }
+    ).with_db(path)
     database = open_database(path)
     try:
         batch = IngestionPipeline(database, settings=settings).ingest_manifest(
@@ -124,6 +130,7 @@ def test_analysis_reports_are_real_and_course_scoped(api: DashboardAPI) -> None:
     assert coverage.payload["summary"]["total_concepts"] > 0
     assert coverage.payload["syllabus"]["syllabus_id"]
     assert "unmapped_questions" in coverage.payload
+    assert "question_assignments" in coverage.payload
 
     analytics = call(api, "GET", f"/api/courses/{CS}/analytics?view=summary")
     assert analytics.status == 200
@@ -277,6 +284,8 @@ def test_tutor_uses_stored_evidence_and_refuses_unimplemented_work(api: Dashboar
     assert context.status == 200
     assert context.payload["concept_count"] > 0
     assert context.payload["capabilities"]["answer_grading"]["available"] is True
+    assert context.payload["capabilities"]["conversational_reasoning"]["available"] is True
+    assert context.payload["capabilities"]["exam_focus"]["available"] is True
     suggestion = context.payload["suggestions"][0]
 
     answer = call(
@@ -295,6 +304,21 @@ def test_tutor_uses_stored_evidence_and_refuses_unimplemented_work(api: Dashboar
     ]
     assert citations, "an answered tutor response must cite stored evidence"
     assert answer.payload["course_id"] == CS
+    headings = [section["heading"] for section in answer.payload["sections"]]
+    assert "Explanation" in headings
+    assert "What to learn" in headings
+    assert "What the analysed corpus shows" not in headings
+
+    focus = call(
+        api,
+        "POST",
+        f"/api/courses/{CS}/tutor/ask",
+        {"question": "What should I study for the exam?"},
+    )
+    assert focus.status == 200
+    assert focus.payload["status"] == "answered"
+    assert focus.payload["sections"][0]["heading"] == "Your revision focus"
+    assert "not a prediction" in focus.payload["answer"].lower()
 
     grading = call(
         api, "POST", f"/api/courses/{CS}/tutor/ask", {"question": "Grade my answer please"}
@@ -336,6 +360,12 @@ def test_generated_batch_expands_to_distinct_concepts_and_answer_checks_work(
 ) -> None:
     options = call(api, "GET", f"/api/courses/{CS}/generation/options")
     concept = options.payload["concepts"][0]
+    provider_names = [item["name"] for item in options.payload["providers"]]
+    assert provider_names == ["template", "auto"]
+    assert options.payload["providers"][1]["resolved_name"] == "template"
+    numerical = next(item for item in options.payload["formats"] if item["format"] == "numerical")
+    assert numerical["requires_model"] is True
+    assert numerical["supported_by_provider"] == []
     generated = call(
         api,
         "POST",
@@ -361,6 +391,17 @@ def test_generated_batch_expands_to_distinct_concepts_and_answer_checks_work(
     assert len({item["question_id"] for item in batch["questions"]}) == 3
     assert any(item["code"] == "generation_batch_expanded" for item in batch["warnings"])
 
+    scoped = call(
+        api,
+        "GET",
+        f"/api/courses/{CS}/generated?batch_id={batch['batch_id']}&limit=100",
+    )
+    assert scoped.status == 200
+    assert scoped.payload["total"] == 3
+    assert {item["question_id"] for item in scoped.payload["questions"]} == {
+        item["question_id"] for item in batch["questions"]
+    }
+
     question = batch["questions"][0]
     answer = (
         f"{question['concept_labels'][0]} is the topic. It is explained in the "
@@ -377,7 +418,31 @@ def test_generated_batch_expands_to_distinct_concepts_and_answer_checks_work(
     assert 0.0 <= checked.payload["score"] <= 1.0
     assert checked.payload["verdict"] in {"strong_match", "partial", "needs_more"}
     assert checked.payload["expected_points"]
+    assert checked.payload["expected_outline"]
+    assert checked.payload["coverage"]["key_ideas"]["total"] == len(
+        checked.payload["expected_outline"]
+    )
+    assert all(
+        item["status"] in {"covered", "partial", "missing"}
+        for item in checked.payload["expected_outline"]
+    )
+    assert "awarded_score" not in checked.payload
+    assert "max_score" not in checked.payload
+    assert "not a grade" in checked.payload["feedback"].casefold()
     assert checked.payload["limitations"]
+
+    partial = call(
+        api,
+        "POST",
+        f"/api/courses/{CS}/generated/{question['question_id']}/grade",
+        {"answer": "This topic is described in the stored material."},
+    )
+    assert partial.status == 200, partial.payload
+    assert (
+        partial.payload["coverage"]["key_ideas"]["missing"]
+        or partial.payload["coverage"]["key_ideas"]["partial"]
+    )
+    assert any(item["status"] != "covered" for item in partial.payload["expected_outline"])
 
     empty = call(
         api,
@@ -403,7 +468,9 @@ def test_tutor_does_not_claim_graph_only_concepts_are_syllabus_placed(
 ) -> None:
     """A concept with no Phase 7 row must not be described as syllabus content."""
 
-    context = call(api, "GET", f"/api/courses/{CS}/tutor/context").payload
+    # The sample's graph-only concepts rank after its syllabus/coverage
+    # suggestions, so request enough candidates to exercise the contract.
+    context = call(api, "GET", f"/api/courses/{CS}/tutor/context?limit=50").payload
     graph_only = next(
         (
             item
@@ -515,6 +582,73 @@ def test_create_course_validation_and_duplicate_offerings(api: DashboardAPI) -> 
     invalid = call(api, "POST", "/api/courses", {**payload, "course_id": "x"})
     assert invalid.status == 422
     assert invalid.payload["error"]["code"] == "invalid_request"
+
+
+def test_streaming_answer_extractor_handles_split_json_escapes() -> None:
+    extractor = _PartialAnswerExtractor()
+    chunks = [
+        '{"answer":"A stack uses ',
+        'LIFO. \\"Top\\" is removed first.\\',
+        'nNext line.", "key_points": []}',
+    ]
+    text = "".join(extractor.feed(chunk) for chunk in chunks)
+    assert text == 'A stack uses LIFO. "Top" is removed first.\nNext line.'
+
+
+def test_http_server_streams_tutor_progress_and_result(api: DashboardAPI) -> None:
+    context = call(api, "GET", f"/api/courses/{CS}/tutor/context")
+    suggestion = context.payload["suggestions"][0]
+    server = create_server(api, "127.0.0.1", 0)
+    thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05})
+    thread.daemon = True
+    thread.start()
+    host, port = server.server_address[:2]
+    base = f"http://{host}:{port}"
+    try:
+        request = Request(
+            f"{base}/api/courses/{CS}/tutor/ask/stream",
+            data=json.dumps(
+                {
+                    "question": f"Explain {suggestion['label']}",
+                    "concept_id": suggestion["concept_id"],
+                }
+            ).encode("utf-8"),
+            method="POST",
+            headers={"Content-Type": "application/json", "Accept": "text/event-stream"},
+        )
+        with urlopen(request, timeout=10) as response:
+            assert response.status == 200
+            assert response.headers["Content-Type"].startswith("text/event-stream")
+            raw = response.read().decode("utf-8")
+        frames: list[tuple[str, dict]] = []
+        for block in raw.split("\n\n"):
+            if not block.strip():
+                continue
+            event = "message"
+            data: list[str] = []
+            for line in block.splitlines():
+                if line.startswith("event: "):
+                    event = line[len("event: ") :]
+                elif line.startswith("data: "):
+                    data.append(line[len("data: ") :])
+            assert data, block
+            frames.append((event, json.loads("\n".join(data))))
+        names = [name for name, _ in frames]
+        assert names[0] == "status"
+        assert any(
+            name == "status"
+            and payload.get("stage") == "stored_evidence"
+            and payload.get("message")
+            for name, payload in frames
+        )
+        assert "result" in names
+        assert names[-1] == "result"
+        result = next(payload for name, payload in frames if name == "result")
+        assert result["status"] == "answered"
+        assert result["sections"]
+    finally:
+        server.shutdown()
+        server.server_close()
 
 
 def test_http_server_refuses_a_port_already_in_use(api: DashboardAPI) -> None:

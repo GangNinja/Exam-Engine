@@ -121,7 +121,9 @@ _TYPE_TO_FORMAT: dict[QuestionType, GenerationFormat] = {
 _PHASE10_DOWNGRADES = {"missing_answer_key"}
 
 #: Passage methods that only anchor a concept label, with no explanatory text.
-_THIN_METHODS = frozenset({"syllabus_concept_label", "syllabus_topic"})
+_THIN_METHODS = frozenset(
+    {"syllabus_concept_label", "syllabus_topic", "syllabus_unit_topics"}
+)
 
 
 @dataclass(frozen=True)

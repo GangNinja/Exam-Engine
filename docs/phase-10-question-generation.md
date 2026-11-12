@@ -38,7 +38,7 @@ Phases 1–9 and writes only to its own two tables.
 | [`src/exam_engine/generation/validation.py`](../src/exam_engine/generation/validation.py) | Twenty-five named checks over an assembled question, grouped structure / alignment / answerability / MCQ / quality / cognitive |
 | [`src/exam_engine/generation/dedupe.py`](../src/exam_engine/generation/dedupe.py) | Duplicate and variant detection against existing generated and historical questions, reusing Phase 3 similarity |
 | [`src/exam_engine/generation/service.py`](../src/exam_engine/generation/service.py) | Scope resolution, target expansion/evidence selection, provider calls, assembly, validation, dedupe, persistence and review |
-| [`src/exam_engine/generation/grading.py`](../src/exam_engine/generation/grading.py) | Local multiple-choice and lexical free-text checks used by the dashboard; study feedback with explicit limitations, never an examination mark |
+| [`src/exam_engine/generation/grading.py`](../src/exam_engine/generation/grading.py) | Local multiple-choice and lexical free-text checks used by the dashboard; key-idea coverage with explicit limitations, never an examination mark |
 | [`src/exam_engine/storage/generation_repository.py`](../src/exam_engine/storage/generation_repository.py) | Batch and question persistence, listing, revision-safe saves and report export |
 | [`src/exam_engine/storage/generation_mappers.py`](../src/exam_engine/storage/generation_mappers.py) | Row ↔ model mapping, including JSON columns and option/answer keys |
 | [`src/exam_engine/storage/migrations/0007_generated_questions.sql`](../src/exam_engine/storage/migrations/0007_generated_questions.sql) | `generation_batches` and `generated_questions` with course/syllabus foreign keys and lookup indexes |
@@ -440,9 +440,11 @@ Not ready for:
   first-in-first-out"), the item is answerable but less precise than a hand-written
   one, and the mismatch is left for the reviewer rather than hidden.
 * The dashboard's answer check is lexical: it compares multiple choice with the
-  stored key, and free text with stored terms and expected points. It can
-  under-credit a correct paraphrase and over-credit keyword stuffing; it is not an
-  examination grade and does not persist attempts.
+  stored key, and free text with stored terms and expected points. Regular and
+  listed irregular plurals plus a small fixed set of common synonyms are
+  normalized, but other paraphrases can still be under-credited and keyword
+  stuffing over-credited; it is not an examination grade and does not persist
+  attempts.
 * Segmentation sometimes glues a section heading to its sentence ("2. Queue A queue
   is …"). Such a heading is dropped when masking consumed it, but a heading that is
   not the answer can still appear in a stem.

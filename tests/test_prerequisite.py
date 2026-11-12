@@ -956,19 +956,19 @@ def test_max_depth_and_max_length_report_unresolved_prerequisites() -> None:
     try:
         concepts = _direct_fixture(
             database,
-            labels=["A", "B", "C", "D"],
+            labels=["Alpha", "Beta", "Gamma", "Delta"],
             links=[
-                ("A", "B", GraphEdgeStatus.EXPLICIT),
-                ("B", "C", GraphEdgeStatus.EXPLICIT),
-                ("C", "D", GraphEdgeStatus.EXPLICIT),
+                ("Alpha", "Beta", GraphEdgeStatus.EXPLICIT),
+                ("Beta", "Gamma", GraphEdgeStatus.EXPLICIT),
+                ("Gamma", "Delta", GraphEdgeStatus.EXPLICIT),
             ],
         )
-        shallow = _plan(database, "phase6-direct-v1", concepts["D"], max_depth=1)
+        shallow = _plan(database, "phase6-direct-v1", concepts["Delta"], max_depth=1)
         assert shallow.status == LearningPathStatus.PARTIAL.value
-        assert [step.label for step in shallow.steps] == ["C", "D"]
-        assert [item.label for item in shallow.unresolved_concepts] == ["B"]
+        assert [step.label for step in shallow.steps] == ["Gamma", "Delta"]
+        assert [item.label for item in shallow.unresolved_concepts] == ["Beta"]
 
-        truncated = _plan(database, "phase6-direct-v1", concepts["D"], max_path_length=1)
+        truncated = _plan(database, "phase6-direct-v1", concepts["Delta"], max_path_length=1)
         assert truncated.status == LearningPathStatus.PARTIAL.value
         assert len(truncated.steps) == 1
         assert any("truncated" in item for item in truncated.limitations)
@@ -1027,8 +1027,8 @@ def test_validation_reports_isolated_concepts_and_missing_metadata() -> None:
     try:
         concepts = _direct_fixture(
             database,
-            labels=["A", "B", "Isolated"],
-            links=[("A", "B", GraphEdgeStatus.CANDIDATE)],
+            labels=["Alpha", "Beta", "Isolated"],
+            links=[("Alpha", "Beta", GraphEdgeStatus.CANDIDATE)],
         )
         report = PrerequisiteDiscoveryService(GraphService(database)).validate("phase6-direct-v1")
         assert report.candidate_count == 1
@@ -1038,8 +1038,8 @@ def test_validation_reports_isolated_concepts_and_missing_metadata() -> None:
         plan = _plan(
             database,
             "phase6-direct-v1",
-            concepts["B"],
-            known=[concepts["A"].node_id, "does-not-exist"],
+            concepts["Beta"],
+            known=[concepts["Alpha"].node_id, "does-not-exist"],
         )
         assert plan.missing_metadata
         assert plan.status == LearningPathStatus.INSUFFICIENT_EVIDENCE.value
@@ -1114,23 +1114,23 @@ def test_max_path_length_retains_the_target_and_marks_omitted_prerequisites() ->
     try:
         concepts = _direct_fixture(
             database,
-            labels=["A", "B", "C", "D"],
+            labels=["Alpha", "Beta", "Gamma", "Delta"],
             links=[
-                ("A", "B", GraphEdgeStatus.EXPLICIT),
-                ("B", "C", GraphEdgeStatus.EXPLICIT),
-                ("C", "D", GraphEdgeStatus.EXPLICIT),
+                ("Alpha", "Beta", GraphEdgeStatus.EXPLICIT),
+                ("Beta", "Gamma", GraphEdgeStatus.EXPLICIT),
+                ("Gamma", "Delta", GraphEdgeStatus.EXPLICIT),
             ],
         )
         plan = _plan(
             database,
             "phase6-direct-v1",
-            concepts["D"],
+            concepts["Delta"],
             max_path_length=1,
         )
         assert plan.status == LearningPathStatus.PARTIAL.value
-        assert [step.label for step in plan.steps] == ["D"]
+        assert [step.label for step in plan.steps] == ["Delta"]
         assert plan.steps[0].role == PathStepRole.TARGET.value
-        assert {item.label for item in plan.unresolved_concepts} == {"A", "B", "C"}
+        assert {item.label for item in plan.unresolved_concepts} == {"Alpha", "Beta", "Gamma"}
         assert all(item.provenance.get("entity_id") for item in plan.unresolved_concepts)
         assert any("truncated" in item for item in plan.limitations)
     finally:
@@ -1395,10 +1395,10 @@ def test_path_uses_the_settings_default_depth_when_the_request_omits_it() -> Non
     try:
         concepts = _direct_fixture(
             database,
-            labels=["A", "B", "C"],
+            labels=["Alpha", "Beta", "Gamma"],
             links=[
-                ("A", "B", GraphEdgeStatus.EXPLICIT),
-                ("B", "C", GraphEdgeStatus.EXPLICIT),
+                ("Alpha", "Beta", GraphEdgeStatus.EXPLICIT),
+                ("Beta", "Gamma", GraphEdgeStatus.EXPLICIT),
             ],
         )
         plan = LearningPathService(
@@ -1406,11 +1406,11 @@ def test_path_uses_the_settings_default_depth_when_the_request_omits_it() -> Non
         ).generate(
             LearningPathRequest(
                 course_id="phase6-direct-v1",
-                target_node_id=concepts["C"].node_id,
+                target_node_id=concepts["Gamma"].node_id,
             )
         )
-        assert [step.label for step in plan.steps] == ["B", "C"]
-        assert [item.label for item in plan.unresolved_concepts] == ["A"]
+        assert [step.label for step in plan.steps] == ["Beta", "Gamma"]
+        assert [item.label for item in plan.unresolved_concepts] == ["Alpha"]
         assert plan.status == LearningPathStatus.PARTIAL.value
         assert plan.config["path_max_depth_effective"] == 1
     finally:

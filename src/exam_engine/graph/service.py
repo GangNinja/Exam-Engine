@@ -39,6 +39,7 @@ from exam_engine.models.graph import (
 )
 from exam_engine.models.question import Uncertainty
 from exam_engine.models.understanding import UnitMatch
+from exam_engine.nlp.concept_quality import concept_noise_reason
 from exam_engine.nlp.keywords import normalize_term
 from exam_engine.storage.db import Database
 from exam_engine.storage.graph_repository import GraphRepository
@@ -295,37 +296,82 @@ class GraphService:
                 raise KeyError(f"unknown course: {course_id}")
             GraphRepository(session).clear(course_id)
 
-    def status(self) -> list[dict[str, object]]:
+    def status(self, course_id: str | None = None) -> list[dict[str, object]]:
         rows: list[dict[str, object]] = []
         with self.db.session() as session:
-            courses = CourseRepository(session).list()
+            if course_id:
+                course = CourseRepository(session).get(course_id)
+                courses = [course] if course else []
+            else:
+                courses = CourseRepository(session).list()
             repo = GraphRepository(session)
+            # Status is requested during dashboard bootstrap. Project only the
+            # fields needed for the counts so the all-course path does not map
+            # tens of thousands of ORM objects on every request.
+            node_rows = repo.status_nodes(course_id=course_id)
+            edge_rows = repo.status_edges(course_id=course_id)
+            nodes_by_course: dict[str, list[dict[str, object]]] = defaultdict(list)
+            edges_by_course: dict[str, list[dict[str, object]]] = defaultdict(list)
+            for node in node_rows:
+                nodes_by_course[str(node["course_id"])].append(node)
+            for edge in edge_rows:
+                edges_by_course[str(edge["course_id"])].append(edge)
+            global_node_ids = (
+                {str(node["node_id"]) for node in node_rows}
+                if course_id is None
+                else None
+            )
             for course in courses:
+                all_nodes = nodes_by_course.get(course.course_id, [])
+                hidden_ids = {
+                    str(node["node_id"])
+                    for node in all_nodes
+                    if node["node_type"] in (
+                        GraphNodeType.CONCEPT.value,
+                        GraphNodeType.TOPIC.value,
+                    )
+                    and concept_noise_reason(str(node["label"])) is not None
+                }
+                nodes = [node for node in all_nodes if str(node["node_id"]) not in hidden_ids]
+                edges = [
+                    edge
+                    for edge in edges_by_course.get(course.course_id, [])
+                    if str(edge["source_node_id"]) not in hidden_ids
+                    and str(edge["target_node_id"]) not in hidden_ids
+                ]
+                if global_node_ids is None:
+                    dangling_edges = repo.has_dangling_edges(course_id=course.course_id)
+                else:
+                    dangling_edges = any(
+                        str(edge["source_node_id"]) not in global_node_ids
+                        or str(edge["target_node_id"]) not in global_node_ids
+                        for edge in edges_by_course.get(course.course_id, [])
+                    )
                 rows.append(
                     {
                         "course_id": course.course_id,
-                        "nodes": repo.count_nodes(course_id=course.course_id),
-                        "edges": repo.count_edges(course_id=course.course_id),
-                        "concepts": repo.count_nodes(
-                            course_id=course.course_id, node_type=GraphNodeType.CONCEPT
+                        "nodes": max(0, len(all_nodes) - len(hidden_ids)),
+                        "edges": len(edges),
+                        "concepts": sum(
+                            node["node_type"] == GraphNodeType.CONCEPT.value for node in nodes
                         ),
-                        "questions": repo.count_nodes(
-                            course_id=course.course_id, node_type=GraphNodeType.QUESTION
+                        "questions": sum(
+                            node["node_type"] == GraphNodeType.QUESTION.value for node in all_nodes
                         ),
-                        "units": repo.count_nodes(
-                            course_id=course.course_id, node_type=GraphNodeType.UNIT
+                        "units": sum(
+                            node["node_type"] == GraphNodeType.UNIT.value for node in all_nodes
                         ),
-                        "topics": repo.count_nodes(
-                            course_id=course.course_id, node_type=GraphNodeType.TOPIC
+                        "topics": sum(
+                            node["node_type"] == GraphNodeType.TOPIC.value for node in nodes
                         ),
-                        "sessions": repo.count_nodes(
-                            course_id=course.course_id, node_type=GraphNodeType.EXAM_SESSION
+                        "sessions": sum(
+                            node["node_type"] == GraphNodeType.EXAM_SESSION.value
+                            for node in all_nodes
                         ),
-                        "candidate_edges": repo.count_edges(
-                            course_id=course.course_id,
-                            status=GraphEdgeStatus.CANDIDATE,
+                        "candidate_edges": sum(
+                            edge["status"] == GraphEdgeStatus.CANDIDATE.value for edge in edges
                         ),
-                        "dangling_edges": repo.has_dangling_edges(course_id=course.course_id),
+                        "dangling_edges": dangling_edges,
                     }
                 )
         return rows
@@ -521,9 +567,17 @@ class GraphService:
         if limit < 1:
             raise ValueError("limit must be positive")
         with self.db.session() as session:
-            return GraphRepository(session).list_nodes(
+            nodes = GraphRepository(session).list_nodes(
                 course_id=course_id, node_type=node_type, limit=limit
             )
+        if node_type in (None, GraphNodeType.CONCEPT, GraphNodeType.TOPIC):
+            nodes = [
+                node
+                for node in nodes
+                if node.node_type not in (GraphNodeType.CONCEPT, GraphNodeType.TOPIC)
+                or concept_noise_reason(node.label) is None
+            ]
+        return nodes
 
     def assessment_edges(
         self,
@@ -554,10 +608,12 @@ class GraphService:
             edges = GraphRepository(session).list_edges(
                 course_id=course_id, relationship=GraphRelationship.ASSESSES
             )
+        valid_concept_ids = {node.node_id for node in self.concepts(course_id)}
         return [
             edge
             for edge in edges
             if edge.status in allowed
+            and edge.target_node_id in valid_concept_ids
             and (include_disabled or not bool(edge.metadata.get("disabled")))
             and (syllabus_id is None or edge.syllabus_id is None or edge.syllabus_id == syllabus_id)
         ]
@@ -587,10 +643,16 @@ class GraphService:
                 syllabus_id=syllabus_id,
                 relationship=GraphRelationship.PREREQUISITE_OF,
             )
+        # Hidden option/page/instruction artifacts must not reappear as
+        # prerequisite endpoints merely because an old derived edge remains in
+        # the graph table. Source nodes and edges are left untouched.
+        valid_ids = {node.node_id for node in self.concepts(course_id)}
         return [
             edge
             for edge in edges
             if edge.status in allowed
+            and edge.source_node_id in valid_ids
+            and edge.target_node_id in valid_ids
             and (include_disabled or not bool(edge.metadata.get("disabled")))
         ]
 
@@ -625,6 +687,12 @@ class GraphService:
         ]
         if exact_ids:
             return sorted(exact_ids, key=lambda item: (item.label.casefold(), item.node_id))[:limit]
+        nodes = [
+            node
+            for node in nodes
+            if node.node_type not in (GraphNodeType.CONCEPT, GraphNodeType.TOPIC)
+            or concept_noise_reason(node.label) is None
+        ]
         exact_labels = [node for node in nodes if wanted and normalize_term(node.label) == wanted]
         if exact_labels:
             return sorted(exact_labels, key=lambda item: (item.label.casefold(), item.node_id))[
@@ -653,9 +721,13 @@ class GraphService:
     ) -> list[GraphNode]:
         with self.db.session() as session:
             repo = GraphRepository(session)
-            concepts = repo.list_nodes(
-                course_id=course_id, node_type=GraphNodeType.CONCEPT, limit=10000
-            )
+            concepts = [
+                node
+                for node in repo.list_nodes(
+                    course_id=course_id, node_type=GraphNodeType.CONCEPT, limit=10000
+                )
+                if concept_noise_reason(node.label) is None
+            ]
             if unit_id is None and syllabus_id is None:
                 return concepts
             allowed: set[str] | None = None
@@ -1041,12 +1113,13 @@ class GraphService:
         self, normalized_label: str, *, course_id: str | None = None
     ) -> list[GraphNode]:
         with self.db.session() as session:
-            return GraphRepository(session).list_nodes(
+            nodes = GraphRepository(session).list_nodes(
                 course_id=course_id,
                 node_type=GraphNodeType.CONCEPT,
                 normalized_label=normalize_term(normalized_label),
                 limit=10000,
             )
+        return [node for node in nodes if concept_noise_reason(node.label) is None]
 
     def concept_duplicates(
         self, course_id: str, *, threshold: float | None = None
@@ -1057,9 +1130,13 @@ class GraphService:
             raise ValueError("threshold must be between 0 and 1")
         with self.db.session() as session:
             repo = GraphRepository(session)
-            concepts = repo.list_nodes(
-                course_id=course_id, node_type=GraphNodeType.CONCEPT, limit=10000
-            )
+            concepts = [
+                node
+                for node in repo.list_nodes(
+                    course_id=course_id, node_type=GraphNodeType.CONCEPT, limit=10000
+                )
+                if concept_noise_reason(node.label) is None
+            ]
             candidates = self._lexical_duplicate_candidates(course_id, concepts, cutoff)
             candidates.extend(
                 self._embedding_duplicate_candidates(session, repo, course_id, concepts, cutoff)

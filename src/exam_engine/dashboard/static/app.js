@@ -9,6 +9,7 @@ import { renderDatasets } from "./views/datasets.js";
 import { renderExams } from "./views/exams.js";
 import { renderLearning } from "./views/learning.js";
 import { renderPractice } from "./views/practice.js";
+import { renderRecovery } from "./views/recovery.js";
 import { renderSyllabus } from "./views/syllabus.js";
 import { renderTutor } from "./views/tutor.js";
 
@@ -132,6 +133,7 @@ const NAV_GROUPS = [
         href: (courseId) => `#/c/${encodeURIComponent(courseId)}/syllabus`,
       },
       { key: "datasets", label: "Dataset management", icon: "upload", href: () => "#/datasets" },
+      { key: "recovery", label: "Dataset quality", icon: "check", href: () => "#/recovery" },
       {
         key: "course",
         label: "Course & documents",
@@ -350,6 +352,7 @@ function activeNavKey(route) {
   if (!route) return "dashboard";
   if (route.name === "dashboard") return "dashboard";
   if (route.name === "datasets") return "datasets";
+  if (route.name === "recovery") return "recovery";
   if (route.name === "new") return "new";
   if (route.name === "exams") return route.mode === "questions" ? "questions" : "exams";
   if (route.name !== "course") return "";
@@ -407,6 +410,8 @@ function drawBreadcrumbs(route) {
     pieces.push({ label: "Not found", current: true });
   } else if (route.name === "datasets") {
     pieces.push({ label: "Resources" }, { label: "Dataset management", current: true });
+  } else if (route.name === "recovery") {
+    pieces.push({ label: "Resources" }, { label: "Dataset quality & recovery", current: true });
   } else if (route.name === "new") {
     pieces.push({ label: "Resources" }, { label: "New course", current: true });
   } else if (route.name === "exams") {
@@ -499,6 +504,13 @@ async function renderRoute({ focus = true, preserveScroll = false } = {}) {
   if (route.name === "datasets") {
     document.title = "Dataset management · Exam Engine";
     viewRoot.replaceChildren(renderDatasets(createContext(null, signal, route)));
+    afterRender({ focus, scrollY });
+    return;
+  }
+
+  if (route.name === "recovery") {
+    document.title = "Dataset quality & recovery · Exam Engine";
+    viewRoot.replaceChildren(renderRecovery(createContext(null, signal, route)));
     afterRender({ focus, scrollY });
     return;
   }
@@ -682,6 +694,7 @@ function parseRoute() {
   if (parts[0] === "dashboard") return { name: "dashboard", query };
   if (parts[0] === "new") return { name: "new", query };
   if (parts[0] === "datasets") return { name: "datasets", query };
+  if (parts[0] === "recovery") return { name: "recovery", query };
   if (parts[0] === "exams") {
     const mode = ["questions", "papers"].includes(parts[1]) ? parts[1] : "explore";
     return { name: "exams", mode, query };
@@ -901,6 +914,9 @@ function handleCommandKeys(event) {
     event.preventDefault();
     const active = commandNodes[commandIndex];
     if (active) runCommand(active.dataset.href);
+  } else if (event.key === "Escape") {
+    event.preventDefault();
+    commandDialog.close();
   }
 }
 

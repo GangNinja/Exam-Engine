@@ -12,7 +12,10 @@ from __future__ import annotations
 import json
 import logging
 import os
+import queue
 import re
+import threading
+import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -61,6 +64,7 @@ _SECURITY_HEADERS = {
 }
 
 _UPLOAD_ROUTE = re.compile(r"^/api/courses/([^/]+)/documents/?$")
+_TUTOR_STREAM_ROUTE = re.compile(r"^/api/courses/([^/]+)/tutor/ask/stream/?$")
 _BOUNDARY_RE = re.compile(r"boundary=(?:\"([^\"]+)\"|([^;]+))", re.IGNORECASE)
 
 
@@ -120,6 +124,13 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                 self._reject_cross_origin()
                 if method == "HEAD":
                     raise ApiError(405, "method_not_allowed", "HEAD is not supported for the API")
+                tutor_stream = _TUTOR_STREAM_ROUTE.fullmatch(path)
+                if method == "POST" and tutor_stream:
+                    stream_body = self.server.api.parse_tutor_ask_stream_request(
+                        self._read_json_body()
+                    )
+                    self._stream_tutor(unquote(tutor_stream.group(1)), stream_body, request_id)
+                    return
                 upload = _UPLOAD_ROUTE.fullmatch(path)
                 if method == "POST" and upload:
                     fields, filename, data = self._read_upload()
@@ -219,6 +230,90 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             raise ApiError(400, "missing_file", "include one file field named 'file'")
         return fields, filename, data
 
+    # -- streaming responses -----------------------------------------------
+    def _stream_tutor(self, course_id: str, body: dict[str, Any], request_id: str) -> None:
+        events: queue.Queue[dict[str, Any] | None] = queue.Queue()
+
+        def emit(event: dict[str, Any]) -> None:
+            events.put(
+                {
+                    "event": str(event.get("event") or "status"),
+                    "data": {key: value for key, value in event.items() if key != "event"},
+                }
+            )
+
+        def work() -> None:
+            try:
+                result = self.server.api.stream_tutor_ask(course_id, body, on_event=emit)
+            except ApiError as exc:
+                events.put({"event": "error", "data": exc.as_dict(request_id=request_id)})
+            except Exception:  # noqa: BLE001 - worker fault boundary
+                logger.exception("tutor stream failed: %s", course_id)
+                events.put(
+                    {
+                        "event": "error",
+                        "data": {
+                            "error": {
+                                "code": "internal_error",
+                                "message": "the tutor stream hit an unexpected error",
+                                "detail": {},
+                            },
+                            "request_id": request_id,
+                        },
+                    }
+                )
+            else:
+                events.put({"event": "result", "data": result})
+            finally:
+                events.put(None)
+
+        worker = threading.Thread(target=work, name="dashboard-tutor-stream", daemon=True)
+        started = time.monotonic()
+        try:
+            self.send_response(200)
+            self._security_headers(request_id)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Connection", "close")
+            self.send_header("X-Accel-Buffering", "no")
+            self.close_connection = True
+            self.end_headers()
+            self._send_sse(
+                "status",
+                {"stage": "starting", "message": "Preparing the tutor stream…"},
+            )
+            worker.start()
+            while True:
+                try:
+                    item = events.get(timeout=8)
+                except queue.Empty:
+                    self._send_sse(
+                        "heartbeat",
+                        {"elapsed_seconds": int(time.monotonic() - started)},
+                    )
+                    continue
+                if item is None:
+                    break
+                self._send_sse(
+                    str(item.get("event") or "status"),
+                    item.get("data") or {},
+                )
+        except (BrokenPipeError, ConnectionResetError):
+            logger.debug("dashboard client disconnected from tutor stream: %s", course_id)
+        finally:
+            self.close_connection = True
+
+    def _send_sse(self, event: str, data: Any) -> None:
+        frame = (
+            b"event: "
+            + event.encode("ascii", errors="replace")
+            + b"\ndata: "
+            + _json_bytes(data)
+            + b"\n\n"
+        )
+        self.wfile.write(frame)
+        self.wfile.flush()
+
     # -- responses ---------------------------------------------------------
     def _send_json(self, response: ApiResponse, *, request_id: str) -> None:
         try:
@@ -266,7 +361,9 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         self._security_headers(uuid.uuid4().hex[:12])
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
-        cache = "no-cache" if candidate.suffix == ".html" else "public, max-age=300"
+        cache = (
+            "no-cache" if candidate.suffix in {".html", ".css", ".js"} else "public, max-age=300"
+        )
         if "/vendor/" in candidate.as_posix():
             cache = "public, max-age=3600"
         self.send_header("Cache-Control", cache)

@@ -1,0 +1,1367 @@
+{
+  "archives": [
+    {
+      "id": "gate-2024-iisc",
+      "provider": "wordpress_media",
+      "exam_terms": [
+        "gate"
+      ],
+      "year": 2024,
+      "base_url": "https://gate2024.iisc.ac.in",
+      "page_url": "https://gate2024.iisc.ac.in/question-papers/",
+      "media_api": "/wp-json/wp/v2/media",
+      "subject_codes": {
+        "aerospace engineering": [
+          "AE"
+        ],
+        "chemistry": [
+          "CY"
+        ],
+        "civil engineering": [
+          "CE1",
+          "CE2"
+        ],
+        "computer science and information technology": [
+          "CS1",
+          "CS2"
+        ],
+        "electrical engineering": [
+          "EE"
+        ],
+        "electronics and communication engineering": [
+          "EC"
+        ],
+        "engineering sciences": [
+          "XE"
+        ],
+        "mathematics": [
+          "MA"
+        ],
+        "physics": [
+          "PH"
+        ],
+        "statistics": [
+          "ST"
+        ]
+      },
+      "paper_title_pattern": "{code}24S",
+      "final_key_title": "{code}FinalAnswerKey",
+      "provisional_key_title": "{code}key",
+      "max_media": 100,
+      "session_aware": true
+    },
+    {
+      "id": "cbse-class-10-2024-2025",
+      "provider": "html_archive",
+      "exam_terms": [
+        "cbse class 10"
+      ],
+      "years": [
+        2024,
+        2025
+      ],
+      "base_url": "https://www.cbse.gov.in",
+      "page_urls": [
+        "https://www.cbse.gov.in/cbsenew/question-paper.html",
+        "https://www.cbse.gov.in/cbsenew/marking-scheme.html"
+      ],
+      "class_code": "X",
+      "subject_mode": "subject",
+      "language": "English",
+      "set_aware": true,
+      "year_order": "oldest",
+      "subjects": {
+        "english": [
+          "ENGLISH_L&L",
+          "English_Language_Lit",
+          "English_Communicative"
+        ],
+        "it": [
+          "Information_Technology",
+          "IT"
+        ],
+        "maths": [
+          "MATHEMATICS_STANDARD",
+          "Mathematics_Standard",
+          "MATHEMATICS"
+        ],
+        "science": [
+          "SCIENCE",
+          "Science"
+        ],
+        "social science": [
+          "SOCIAL_SCIENCE",
+          "Social_Science",
+          "Social Science"
+        ]
+      }
+    },
+    {
+      "id": "cbse-class-12-2024-2025",
+      "provider": "html_archive",
+      "exam_terms": [
+        "cbse class 12"
+      ],
+      "years": [
+        2024,
+        2025
+      ],
+      "base_url": "https://www.cbse.gov.in",
+      "page_urls": [
+        "https://www.cbse.gov.in/cbsenew/question-paper.html",
+        "https://www.cbse.gov.in/cbsenew/marking-scheme.html"
+      ],
+      "class_code": "XII",
+      "subject_mode": "subject",
+      "language": "English",
+      "set_aware": true,
+      "year_order": "oldest",
+      "subjects": {
+        "biology": [
+          "BIOLOGY",
+          "Biology"
+        ],
+        "chemistry": [
+          "CHEMISTRY",
+          "Chemistry"
+        ],
+        "english": [
+          "ENGLISH_CORE",
+          "English_Core",
+          "English_Elective"
+        ],
+        "mathematics": [
+          "MATHEMATICS",
+          "Mathematics"
+        ],
+        "physics": [
+          "PHYSICS",
+          "Physics"
+        ]
+      }
+    },
+    {
+      "id": "jee-advanced-past-papers",
+      "provider": "html_archive",
+      "exam_terms": [
+        "jee advanced"
+      ],
+      "years": [
+        2016,
+        2017,
+        2018,
+        2019,
+        2020,
+        2021,
+        2022,
+        2023,
+        2024,
+        2025
+      ],
+      "base_url": "https://jeeadv.ac.in",
+      "page_url": "https://jeeadv.ac.in/archive.html",
+      "subject_mode": "all_papers",
+      "language": "English",
+      "set_aware": false,
+      "key_availability": "no_public_pre_2024_answer_key_archive",
+      "matchable": true
+    },
+    {
+      "id": "nta-jee-main-2024-final-keys",
+      "provider": "document_urls",
+      "exam_terms": [
+        "jee mains",
+        "jee main"
+      ],
+      "year": 2024,
+      "base_url": "https://nta.ac.in",
+      "page_url": "https://nta.ac.in/",
+      "matchable": false,
+      "key_availability": "published_by_question_id_and_option_id",
+      "unavailable_reason": "NTA publishes JEE Main final keys by question ID and option ID. The local records contain neither, and NTA's question papers with question IDs require candidate login, so an exact question-level mapping cannot be established.",
+      "documents": [
+        {
+          "url": "https://nta.ac.in/Download/Notice/Notice_20240212120843.pdf",
+          "title": "JEE (Main) 2024 Session 1 Final Answer Key (12.02.2024)",
+          "document_type": "answer_key",
+          "year": 2024,
+          "variant": "final",
+          "matchable": false,
+          "unmatchable_reason": "Question-ID based key; local JEE Main records have question numbers but no NTA question IDs.",
+          "identity": {
+            "authority": "National Testing Agency",
+            "exam": "JEE MAIN",
+            "session": "1",
+            "paper": "1",
+            "language": "English"
+          }
+        },
+        {
+          "url": "https://nta.ac.in/Download/Notice/Notice_20240422121837.pdf",
+          "title": "JEE (Main) 2024 Session 2 Final Answer Key (18.04.2024)",
+          "document_type": "answer_key",
+          "year": 2024,
+          "variant": "final",
+          "matchable": false,
+          "unmatchable_reason": "Question-ID based key; local JEE Main records have question numbers but no NTA question IDs.",
+          "identity": {
+            "authority": "National Testing Agency",
+            "exam": "JEE MAIN",
+            "session": "2",
+            "paper": "1",
+            "language": "English"
+          }
+        }
+      ]
+    },
+    {
+      "id": "neet-nta-official",
+      "provider": "document_urls",
+      "exam_terms": [
+        "neet"
+      ],
+      "year": 2024,
+      "base_url": "https://exams.nta.ac.in",
+      "page_url": "https://exams.nta.ac.in/NEET/",
+      "available": false,
+      "matchable": false,
+      "key_availability": "booklet_code_required",
+      "unavailable_reason": "https://exams.nta.ac.in/NEET/ returned HTTP 404 on 2026-11-08. NTA publishes NEET keys per booklet code, while the 2015-2025 local records do not carry a booklet code; only the 2026 rows include Code11/Code50 identities.",
+      "documents": []
+    },
+    {
+      "id": "gate-2025-iitg-archive",
+      "provider": "document_urls",
+      "exam_terms": [
+        "gate"
+      ],
+      "year": 2025,
+      "years": [
+        2025
+      ],
+      "base_url": "https://gate2026.iitg.ac.in",
+      "page_url": "https://gate2026.iitg.ac.in/download.html",
+      "available": true,
+      "matchable": true,
+      "year_order": "newest",
+      "key_availability": "official_master_paper_and_final_answer_key",
+      "documents": [
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2025/AE2025.pdf",
+          "year": 2025,
+          "subject": "Aerospace Engineering",
+          "title": "GATE 2025 Aerospace Engineering Question Paper",
+          "document_type": "question_paper",
+          "variant": "master",
+          "reliability": 0.999,
+          "note": "Official GATE master question paper linked from the GATE 2026 archive; page and file verified during Phase 14.2 continuation.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2025,
+            "subject": "Aerospace Engineering",
+            "subject_code": "AE",
+            "session": null,
+            "paper": null,
+            "set": null,
+            "language": "English",
+            "document_type": "question_paper"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2025_Key/AE_Keys.pdf",
+          "year": 2025,
+          "subject": "Aerospace Engineering",
+          "title": "GATE 2025 Aerospace Engineering Final Answer Key",
+          "document_type": "answer_key",
+          "variant": "final",
+          "reliability": 0.999,
+          "note": "Official GATE final answer key linked from the GATE 2026 archive; not a provisional key.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2025,
+            "subject": "Aerospace Engineering",
+            "subject_code": "AE",
+            "session": null,
+            "paper": null,
+            "set": null,
+            "language": "English",
+            "document_type": "answer_key"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2025/CY2025.pdf",
+          "year": 2025,
+          "subject": "Chemistry",
+          "title": "GATE 2025 Chemistry Question Paper",
+          "document_type": "question_paper",
+          "variant": "master",
+          "reliability": 0.999,
+          "note": "Official GATE master question paper linked from the GATE 2026 archive; page and file verified during Phase 14.2 continuation.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2025,
+            "subject": "Chemistry",
+            "subject_code": "CY",
+            "session": null,
+            "paper": null,
+            "set": null,
+            "language": "English",
+            "document_type": "question_paper"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2025_Key/CY_Keys.pdf",
+          "year": 2025,
+          "subject": "Chemistry",
+          "title": "GATE 2025 Chemistry Final Answer Key",
+          "document_type": "answer_key",
+          "variant": "final",
+          "reliability": 0.999,
+          "note": "Official GATE final answer key linked from the GATE 2026 archive; not a provisional key.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2025,
+            "subject": "Chemistry",
+            "subject_code": "CY",
+            "session": null,
+            "paper": null,
+            "set": null,
+            "language": "English",
+            "document_type": "answer_key"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2025/CE12025.pdf",
+          "year": 2025,
+          "subject": "Civil Engineering",
+          "title": "GATE 2025 Civil Engineering (CE-1) Question Paper",
+          "document_type": "question_paper",
+          "variant": "master",
+          "reliability": 0.999,
+          "note": "Official GATE master question paper linked from the GATE 2026 archive; page and file verified during Phase 14.2 continuation.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2025,
+            "subject": "Civil Engineering",
+            "subject_code": "CE1",
+            "session": null,
+            "paper": "1",
+            "set": null,
+            "language": "English",
+            "document_type": "question_paper"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2025_Key/CE1_Keys.pdf",
+          "year": 2025,
+          "subject": "Civil Engineering",
+          "title": "GATE 2025 Civil Engineering (CE-1) Final Answer Key",
+          "document_type": "answer_key",
+          "variant": "final",
+          "reliability": 0.999,
+          "note": "Official GATE final answer key linked from the GATE 2026 archive; not a provisional key.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2025,
+            "subject": "Civil Engineering",
+            "subject_code": "CE1",
+            "session": null,
+            "paper": "1",
+            "set": null,
+            "language": "English",
+            "document_type": "answer_key"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2025/CE22025.pdf",
+          "year": 2025,
+          "subject": "Civil Engineering",
+          "title": "GATE 2025 Civil Engineering (CE-2) Question Paper",
+          "document_type": "question_paper",
+          "variant": "master",
+          "reliability": 0.999,
+          "note": "Official GATE master question paper linked from the GATE 2026 archive; page and file verified during Phase 14.2 continuation.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2025,
+            "subject": "Civil Engineering",
+            "subject_code": "CE2",
+            "session": null,
+            "paper": "2",
+            "set": null,
+            "language": "English",
+            "document_type": "question_paper"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2025_Key/CE2_Keys.pdf",
+          "year": 2025,
+          "subject": "Civil Engineering",
+          "title": "GATE 2025 Civil Engineering (CE-2) Final Answer Key",
+          "document_type": "answer_key",
+          "variant": "final",
+          "reliability": 0.999,
+          "note": "Official GATE final answer key linked from the GATE 2026 archive; not a provisional key.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2025,
+            "subject": "Civil Engineering",
+            "subject_code": "CE2",
+            "session": null,
+            "paper": "2",
+            "set": null,
+            "language": "English",
+            "document_type": "answer_key"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2025/CS12025.pdf",
+          "year": 2025,
+          "subject": "Computer Science and Information Technology",
+          "title": "GATE 2025 Computer Science and Information Technology (CS-1) Question Paper",
+          "document_type": "question_paper",
+          "variant": "master",
+          "reliability": 0.999,
+          "note": "Official GATE master question paper linked from the GATE 2026 archive; page and file verified during Phase 14.2 continuation.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2025,
+            "subject": "Computer Science and Information Technology",
+            "subject_code": "CS1",
+            "session": null,
+            "paper": "1",
+            "set": null,
+            "language": "English",
+            "document_type": "question_paper"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2025_Key/CS1_Keys.pdf",
+          "year": 2025,
+          "subject": "Computer Science and Information Technology",
+          "title": "GATE 2025 Computer Science and Information Technology (CS-1) Final Answer Key",
+          "document_type": "answer_key",
+          "variant": "final",
+          "reliability": 0.999,
+          "note": "Official GATE final answer key linked from the GATE 2026 archive; not a provisional key.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2025,
+            "subject": "Computer Science and Information Technology",
+            "subject_code": "CS1",
+            "session": null,
+            "paper": "1",
+            "set": null,
+            "language": "English",
+            "document_type": "answer_key"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2025/CS22025.pdf",
+          "year": 2025,
+          "subject": "Computer Science and Information Technology",
+          "title": "GATE 2025 Computer Science and Information Technology (CS-2) Question Paper",
+          "document_type": "question_paper",
+          "variant": "master",
+          "reliability": 0.999,
+          "note": "Official GATE master question paper linked from the GATE 2026 archive; page and file verified during Phase 14.2 continuation.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2025,
+            "subject": "Computer Science and Information Technology",
+            "subject_code": "CS2",
+            "session": null,
+            "paper": "2",
+            "set": null,
+            "language": "English",
+            "document_type": "question_paper"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2025_Key/CS2_Keys.pdf",
+          "year": 2025,
+          "subject": "Computer Science and Information Technology",
+          "title": "GATE 2025 Computer Science and Information Technology (CS-2) Final Answer Key",
+          "document_type": "answer_key",
+          "variant": "final",
+          "reliability": 0.999,
+          "note": "Official GATE final answer key linked from the GATE 2026 archive; not a provisional key.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2025,
+            "subject": "Computer Science and Information Technology",
+            "subject_code": "CS2",
+            "session": null,
+            "paper": "2",
+            "set": null,
+            "language": "English",
+            "document_type": "answer_key"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2025/EE2025.pdf",
+          "year": 2025,
+          "subject": "Electrical Engineering",
+          "title": "GATE 2025 Electrical Engineering Question Paper",
+          "document_type": "question_paper",
+          "variant": "master",
+          "reliability": 0.999,
+          "note": "Official GATE master question paper linked from the GATE 2026 archive; page and file verified during Phase 14.2 continuation.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2025,
+            "subject": "Electrical Engineering",
+            "subject_code": "EE",
+            "session": null,
+            "paper": null,
+            "set": null,
+            "language": "English",
+            "document_type": "question_paper"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2025_Key/EE_Keys.pdf",
+          "year": 2025,
+          "subject": "Electrical Engineering",
+          "title": "GATE 2025 Electrical Engineering Final Answer Key",
+          "document_type": "answer_key",
+          "variant": "final",
+          "reliability": 0.999,
+          "note": "Official GATE final answer key linked from the GATE 2026 archive; not a provisional key.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2025,
+            "subject": "Electrical Engineering",
+            "subject_code": "EE",
+            "session": null,
+            "paper": null,
+            "set": null,
+            "language": "English",
+            "document_type": "answer_key"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2025/EC2025.pdf",
+          "year": 2025,
+          "subject": "Electronics and Communication Engineering",
+          "title": "GATE 2025 Electronics and Communication Engineering Question Paper",
+          "document_type": "question_paper",
+          "variant": "master",
+          "reliability": 0.999,
+          "note": "Official GATE master question paper linked from the GATE 2026 archive; page and file verified during Phase 14.2 continuation.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2025,
+            "subject": "Electronics and Communication Engineering",
+            "subject_code": "EC",
+            "session": null,
+            "paper": null,
+            "set": null,
+            "language": "English",
+            "document_type": "question_paper"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2025_Key/EC_Keys.pdf",
+          "year": 2025,
+          "subject": "Electronics and Communication Engineering",
+          "title": "GATE 2025 Electronics and Communication Engineering Final Answer Key",
+          "document_type": "answer_key",
+          "variant": "final",
+          "reliability": 0.999,
+          "note": "Official GATE final answer key linked from the GATE 2026 archive; not a provisional key.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2025,
+            "subject": "Electronics and Communication Engineering",
+            "subject_code": "EC",
+            "session": null,
+            "paper": null,
+            "set": null,
+            "language": "English",
+            "document_type": "answer_key"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2025/XE2025.pdf",
+          "year": 2025,
+          "subject": "Engineering Sciences",
+          "title": "GATE 2025 Engineering Sciences Question Paper",
+          "document_type": "question_paper",
+          "variant": "master",
+          "reliability": 0.999,
+          "note": "Official GATE master question paper linked from the GATE 2026 archive; page and file verified during Phase 14.2 continuation.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2025,
+            "subject": "Engineering Sciences",
+            "subject_code": "XE",
+            "session": null,
+            "paper": null,
+            "set": null,
+            "language": "English",
+            "document_type": "question_paper"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2025_Key/XE_Keys.pdf",
+          "year": 2025,
+          "subject": "Engineering Sciences",
+          "title": "GATE 2025 Engineering Sciences Final Answer Key",
+          "document_type": "answer_key",
+          "variant": "final",
+          "reliability": 0.999,
+          "note": "Official GATE final answer key linked from the GATE 2026 archive; not a provisional key.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2025,
+            "subject": "Engineering Sciences",
+            "subject_code": "XE",
+            "session": null,
+            "paper": null,
+            "set": null,
+            "language": "English",
+            "document_type": "answer_key"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2025/MA2025.pdf",
+          "year": 2025,
+          "subject": "Mathematics",
+          "title": "GATE 2025 Mathematics Question Paper",
+          "document_type": "question_paper",
+          "variant": "master",
+          "reliability": 0.999,
+          "note": "Official GATE master question paper linked from the GATE 2026 archive; page and file verified during Phase 14.2 continuation.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2025,
+            "subject": "Mathematics",
+            "subject_code": "MA",
+            "session": null,
+            "paper": null,
+            "set": null,
+            "language": "English",
+            "document_type": "question_paper"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2025_Key/MA_Keys.pdf",
+          "year": 2025,
+          "subject": "Mathematics",
+          "title": "GATE 2025 Mathematics Final Answer Key",
+          "document_type": "answer_key",
+          "variant": "final",
+          "reliability": 0.999,
+          "note": "Official GATE final answer key linked from the GATE 2026 archive; not a provisional key.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2025,
+            "subject": "Mathematics",
+            "subject_code": "MA",
+            "session": null,
+            "paper": null,
+            "set": null,
+            "language": "English",
+            "document_type": "answer_key"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2025/PH2025.pdf",
+          "year": 2025,
+          "subject": "Physics",
+          "title": "GATE 2025 Physics Question Paper",
+          "document_type": "question_paper",
+          "variant": "master",
+          "reliability": 0.999,
+          "note": "Official GATE master question paper linked from the GATE 2026 archive; page and file verified during Phase 14.2 continuation.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2025,
+            "subject": "Physics",
+            "subject_code": "PH",
+            "session": null,
+            "paper": null,
+            "set": null,
+            "language": "English",
+            "document_type": "question_paper"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2025_Key/PH_Keys.pdf",
+          "year": 2025,
+          "subject": "Physics",
+          "title": "GATE 2025 Physics Final Answer Key",
+          "document_type": "answer_key",
+          "variant": "final",
+          "reliability": 0.999,
+          "note": "Official GATE final answer key linked from the GATE 2026 archive; not a provisional key.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2025,
+            "subject": "Physics",
+            "subject_code": "PH",
+            "session": null,
+            "paper": null,
+            "set": null,
+            "language": "English",
+            "document_type": "answer_key"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2025/ST2025.pdf",
+          "year": 2025,
+          "subject": "Statistics",
+          "title": "GATE 2025 Statistics Question Paper",
+          "document_type": "question_paper",
+          "variant": "master",
+          "reliability": 0.999,
+          "note": "Official GATE master question paper linked from the GATE 2026 archive; page and file verified during Phase 14.2 continuation.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2025,
+            "subject": "Statistics",
+            "subject_code": "ST",
+            "session": null,
+            "paper": null,
+            "set": null,
+            "language": "English",
+            "document_type": "question_paper"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2025_Key/ST_Keys.pdf",
+          "year": 2025,
+          "subject": "Statistics",
+          "title": "GATE 2025 Statistics Final Answer Key",
+          "document_type": "answer_key",
+          "variant": "final",
+          "reliability": 0.999,
+          "note": "Official GATE final answer key linked from the GATE 2026 archive; not a provisional key.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2025,
+            "subject": "Statistics",
+            "subject_code": "ST",
+            "session": null,
+            "paper": null,
+            "set": null,
+            "language": "English",
+            "document_type": "answer_key"
+          }
+        }
+      ]
+    },
+    {
+      "id": "gate-2026-iitg-archive",
+      "provider": "document_urls",
+      "exam_terms": [
+        "gate"
+      ],
+      "year": 2026,
+      "years": [
+        2026
+      ],
+      "base_url": "https://gate2026.iitg.ac.in",
+      "page_url": "https://gate2026.iitg.ac.in/QPs-answer-keys.html",
+      "available": true,
+      "matchable": true,
+      "year_order": "newest",
+      "key_availability": "official_master_paper_and_final_answer_key",
+      "documents": [
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2026/QPs/AE.pdf",
+          "year": 2026,
+          "subject": "Aerospace Engineering",
+          "title": "GATE 2026 Aerospace Engineering Question Paper",
+          "document_type": "question_paper",
+          "variant": "master",
+          "reliability": 0.999,
+          "note": "Official GATE master question paper linked from the GATE 2026 archive; page and file verified during Phase 14.2 continuation.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2026,
+            "subject": "Aerospace Engineering",
+            "subject_code": "AE",
+            "session": null,
+            "paper": null,
+            "set": null,
+            "language": "English",
+            "document_type": "question_paper"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2026/Keys/AE_Keys.pdf",
+          "year": 2026,
+          "subject": "Aerospace Engineering",
+          "title": "GATE 2026 Aerospace Engineering Final Answer Key",
+          "document_type": "answer_key",
+          "variant": "final",
+          "reliability": 0.999,
+          "note": "Official GATE final answer key linked from the GATE 2026 archive; not a provisional key.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2026,
+            "subject": "Aerospace Engineering",
+            "subject_code": "AE",
+            "session": null,
+            "paper": null,
+            "set": null,
+            "language": "English",
+            "document_type": "answer_key"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2026/QPs/CY.pdf",
+          "year": 2026,
+          "subject": "Chemistry",
+          "title": "GATE 2026 Chemistry Question Paper",
+          "document_type": "question_paper",
+          "variant": "master",
+          "reliability": 0.999,
+          "note": "Official GATE master question paper linked from the GATE 2026 archive; page and file verified during Phase 14.2 continuation.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2026,
+            "subject": "Chemistry",
+            "subject_code": "CY",
+            "session": null,
+            "paper": null,
+            "set": null,
+            "language": "English",
+            "document_type": "question_paper"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2026/Keys/CY_Keys.pdf",
+          "year": 2026,
+          "subject": "Chemistry",
+          "title": "GATE 2026 Chemistry Final Answer Key",
+          "document_type": "answer_key",
+          "variant": "final",
+          "reliability": 0.999,
+          "note": "Official GATE final answer key linked from the GATE 2026 archive; not a provisional key.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2026,
+            "subject": "Chemistry",
+            "subject_code": "CY",
+            "session": null,
+            "paper": null,
+            "set": null,
+            "language": "English",
+            "document_type": "answer_key"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2026/QPs/CE_1.pdf",
+          "year": 2026,
+          "subject": "Civil Engineering",
+          "title": "GATE 2026 Civil Engineering (CE-1) Question Paper",
+          "document_type": "question_paper",
+          "variant": "master",
+          "reliability": 0.999,
+          "note": "Official GATE master question paper linked from the GATE 2026 archive; page and file verified during Phase 14.2 continuation.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2026,
+            "subject": "Civil Engineering",
+            "subject_code": "CE1",
+            "session": null,
+            "paper": "1",
+            "set": null,
+            "language": "English",
+            "document_type": "question_paper"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2026/Keys/CE1_Keys.pdf",
+          "year": 2026,
+          "subject": "Civil Engineering",
+          "title": "GATE 2026 Civil Engineering (CE-1) Final Answer Key",
+          "document_type": "answer_key",
+          "variant": "final",
+          "reliability": 0.999,
+          "note": "Official GATE final answer key linked from the GATE 2026 archive; not a provisional key.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2026,
+            "subject": "Civil Engineering",
+            "subject_code": "CE1",
+            "session": null,
+            "paper": "1",
+            "set": null,
+            "language": "English",
+            "document_type": "answer_key"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2026/QPs/CE_2.pdf",
+          "year": 2026,
+          "subject": "Civil Engineering",
+          "title": "GATE 2026 Civil Engineering (CE-2) Question Paper",
+          "document_type": "question_paper",
+          "variant": "master",
+          "reliability": 0.999,
+          "note": "Official GATE master question paper linked from the GATE 2026 archive; page and file verified during Phase 14.2 continuation.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2026,
+            "subject": "Civil Engineering",
+            "subject_code": "CE2",
+            "session": null,
+            "paper": "2",
+            "set": null,
+            "language": "English",
+            "document_type": "question_paper"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2026/Keys/CE2_Keys.pdf",
+          "year": 2026,
+          "subject": "Civil Engineering",
+          "title": "GATE 2026 Civil Engineering (CE-2) Final Answer Key",
+          "document_type": "answer_key",
+          "variant": "final",
+          "reliability": 0.999,
+          "note": "Official GATE final answer key linked from the GATE 2026 archive; not a provisional key.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2026,
+            "subject": "Civil Engineering",
+            "subject_code": "CE2",
+            "session": null,
+            "paper": "2",
+            "set": null,
+            "language": "English",
+            "document_type": "answer_key"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2026/QPs/CS1.pdf",
+          "year": 2026,
+          "subject": "Computer Science and Information Technology",
+          "title": "GATE 2026 Computer Science and Information Technology (CS-1) Question Paper",
+          "document_type": "question_paper",
+          "variant": "master",
+          "reliability": 0.999,
+          "note": "Official GATE master question paper linked from the GATE 2026 archive; page and file verified during Phase 14.2 continuation.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2026,
+            "subject": "Computer Science and Information Technology",
+            "subject_code": "CS1",
+            "session": null,
+            "paper": "1",
+            "set": null,
+            "language": "English",
+            "document_type": "question_paper"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2026/Keys/CS1_Keys.pdf",
+          "year": 2026,
+          "subject": "Computer Science and Information Technology",
+          "title": "GATE 2026 Computer Science and Information Technology (CS-1) Final Answer Key",
+          "document_type": "answer_key",
+          "variant": "final",
+          "reliability": 0.999,
+          "note": "Official GATE final answer key linked from the GATE 2026 archive; not a provisional key.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2026,
+            "subject": "Computer Science and Information Technology",
+            "subject_code": "CS1",
+            "session": null,
+            "paper": "1",
+            "set": null,
+            "language": "English",
+            "document_type": "answer_key"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2026/QPs/CS2.pdf",
+          "year": 2026,
+          "subject": "Computer Science and Information Technology",
+          "title": "GATE 2026 Computer Science and Information Technology (CS-2) Question Paper",
+          "document_type": "question_paper",
+          "variant": "master",
+          "reliability": 0.999,
+          "note": "Official GATE master question paper linked from the GATE 2026 archive; page and file verified during Phase 14.2 continuation.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2026,
+            "subject": "Computer Science and Information Technology",
+            "subject_code": "CS2",
+            "session": null,
+            "paper": "2",
+            "set": null,
+            "language": "English",
+            "document_type": "question_paper"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2026/Keys/CS2_Keys.pdf",
+          "year": 2026,
+          "subject": "Computer Science and Information Technology",
+          "title": "GATE 2026 Computer Science and Information Technology (CS-2) Final Answer Key",
+          "document_type": "answer_key",
+          "variant": "final",
+          "reliability": 0.999,
+          "note": "Official GATE final answer key linked from the GATE 2026 archive; not a provisional key.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2026,
+            "subject": "Computer Science and Information Technology",
+            "subject_code": "CS2",
+            "session": null,
+            "paper": "2",
+            "set": null,
+            "language": "English",
+            "document_type": "answer_key"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2026/QPs/EE.pdf",
+          "year": 2026,
+          "subject": "Electrical Engineering",
+          "title": "GATE 2026 Electrical Engineering Question Paper",
+          "document_type": "question_paper",
+          "variant": "master",
+          "reliability": 0.999,
+          "note": "Official GATE master question paper linked from the GATE 2026 archive; page and file verified during Phase 14.2 continuation.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2026,
+            "subject": "Electrical Engineering",
+            "subject_code": "EE",
+            "session": null,
+            "paper": null,
+            "set": null,
+            "language": "English",
+            "document_type": "question_paper"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2026/Keys/EE_Keys.pdf",
+          "year": 2026,
+          "subject": "Electrical Engineering",
+          "title": "GATE 2026 Electrical Engineering Final Answer Key",
+          "document_type": "answer_key",
+          "variant": "final",
+          "reliability": 0.999,
+          "note": "Official GATE final answer key linked from the GATE 2026 archive; not a provisional key.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2026,
+            "subject": "Electrical Engineering",
+            "subject_code": "EE",
+            "session": null,
+            "paper": null,
+            "set": null,
+            "language": "English",
+            "document_type": "answer_key"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2026/QPs/EC.pdf",
+          "year": 2026,
+          "subject": "Electronics and Communication Engineering",
+          "title": "GATE 2026 Electronics and Communication Engineering Question Paper",
+          "document_type": "question_paper",
+          "variant": "master",
+          "reliability": 0.999,
+          "note": "Official GATE master question paper linked from the GATE 2026 archive; page and file verified during Phase 14.2 continuation.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2026,
+            "subject": "Electronics and Communication Engineering",
+            "subject_code": "EC",
+            "session": null,
+            "paper": null,
+            "set": null,
+            "language": "English",
+            "document_type": "question_paper"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2026/Keys/EC_Keys.pdf",
+          "year": 2026,
+          "subject": "Electronics and Communication Engineering",
+          "title": "GATE 2026 Electronics and Communication Engineering Final Answer Key",
+          "document_type": "answer_key",
+          "variant": "final",
+          "reliability": 0.999,
+          "note": "Official GATE final answer key linked from the GATE 2026 archive; not a provisional key.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2026,
+            "subject": "Electronics and Communication Engineering",
+            "subject_code": "EC",
+            "session": null,
+            "paper": null,
+            "set": null,
+            "language": "English",
+            "document_type": "answer_key"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2026/QPs/XE.pdf",
+          "year": 2026,
+          "subject": "Engineering Sciences",
+          "title": "GATE 2026 Engineering Sciences Question Paper",
+          "document_type": "question_paper",
+          "variant": "master",
+          "reliability": 0.999,
+          "note": "Official GATE master question paper linked from the GATE 2026 archive; page and file verified during Phase 14.2 continuation.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2026,
+            "subject": "Engineering Sciences",
+            "subject_code": "XE",
+            "session": null,
+            "paper": null,
+            "set": null,
+            "language": "English",
+            "document_type": "question_paper"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2026/Keys/XE_Keys.pdf",
+          "year": 2026,
+          "subject": "Engineering Sciences",
+          "title": "GATE 2026 Engineering Sciences Final Answer Key",
+          "document_type": "answer_key",
+          "variant": "final",
+          "reliability": 0.999,
+          "note": "Official GATE final answer key linked from the GATE 2026 archive; not a provisional key.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2026,
+            "subject": "Engineering Sciences",
+            "subject_code": "XE",
+            "session": null,
+            "paper": null,
+            "set": null,
+            "language": "English",
+            "document_type": "answer_key"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2026/QPs/MA.pdf",
+          "year": 2026,
+          "subject": "Mathematics",
+          "title": "GATE 2026 Mathematics Question Paper",
+          "document_type": "question_paper",
+          "variant": "master",
+          "reliability": 0.999,
+          "note": "Official GATE master question paper linked from the GATE 2026 archive; page and file verified during Phase 14.2 continuation.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2026,
+            "subject": "Mathematics",
+            "subject_code": "MA",
+            "session": null,
+            "paper": null,
+            "set": null,
+            "language": "English",
+            "document_type": "question_paper"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2026/Keys/MA_Keys.pdf",
+          "year": 2026,
+          "subject": "Mathematics",
+          "title": "GATE 2026 Mathematics Final Answer Key",
+          "document_type": "answer_key",
+          "variant": "final",
+          "reliability": 0.999,
+          "note": "Official GATE final answer key linked from the GATE 2026 archive; not a provisional key.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2026,
+            "subject": "Mathematics",
+            "subject_code": "MA",
+            "session": null,
+            "paper": null,
+            "set": null,
+            "language": "English",
+            "document_type": "answer_key"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2026/QPs/PH.pdf",
+          "year": 2026,
+          "subject": "Physics",
+          "title": "GATE 2026 Physics Question Paper",
+          "document_type": "question_paper",
+          "variant": "master",
+          "reliability": 0.999,
+          "note": "Official GATE master question paper linked from the GATE 2026 archive; page and file verified during Phase 14.2 continuation.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2026,
+            "subject": "Physics",
+            "subject_code": "PH",
+            "session": null,
+            "paper": null,
+            "set": null,
+            "language": "English",
+            "document_type": "question_paper"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2026/Keys/PH_Keys.pdf",
+          "year": 2026,
+          "subject": "Physics",
+          "title": "GATE 2026 Physics Final Answer Key",
+          "document_type": "answer_key",
+          "variant": "final",
+          "reliability": 0.999,
+          "note": "Official GATE final answer key linked from the GATE 2026 archive; not a provisional key.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2026,
+            "subject": "Physics",
+            "subject_code": "PH",
+            "session": null,
+            "paper": null,
+            "set": null,
+            "language": "English",
+            "document_type": "answer_key"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2026/QPs/ST.pdf",
+          "year": 2026,
+          "subject": "Statistics",
+          "title": "GATE 2026 Statistics Question Paper",
+          "document_type": "question_paper",
+          "variant": "master",
+          "reliability": 0.999,
+          "note": "Official GATE master question paper linked from the GATE 2026 archive; page and file verified during Phase 14.2 continuation.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2026,
+            "subject": "Statistics",
+            "subject_code": "ST",
+            "session": null,
+            "paper": null,
+            "set": null,
+            "language": "English",
+            "document_type": "question_paper"
+          }
+        },
+        {
+          "url": "https://gate2026.iitg.ac.in/doc/download/2026/Keys/ST_Keys.pdf",
+          "year": 2026,
+          "subject": "Statistics",
+          "title": "GATE 2026 Statistics Final Answer Key",
+          "document_type": "answer_key",
+          "variant": "final",
+          "reliability": 0.999,
+          "note": "Official GATE final answer key linked from the GATE 2026 archive; not a provisional key.",
+          "identity": {
+            "exam": "GATE",
+            "authority": "gate2026.iitg.ac.in",
+            "year": 2026,
+            "subject": "Statistics",
+            "subject_code": "ST",
+            "session": null,
+            "paper": null,
+            "set": null,
+            "language": "English",
+            "document_type": "answer_key"
+          }
+        }
+      ]
+    },
+    {
+      "id": "neet-nta-2026-reexam-final-key",
+      "provider": "document_urls",
+      "exam_terms": [
+        "neet"
+      ],
+      "year": 2026,
+      "years": [
+        2026
+      ],
+      "base_url": "https://neet.nta.nic.in",
+      "page_url": "https://neet.nta.nic.in/documents",
+      "available": true,
+      "matchable": false,
+      "unavailable_reason": "Official 2026 re-exam final key is accessible, but no public official question paper with the same booklet code was established; local Code50 records cannot be mapped by question number alone.",
+      "key_availability": "official_final_key_booklets_50_60_70_80;no_public_paper_mapping",
+      "documents": [
+        {
+          "url": "https://cdnbbsr.s3waas.gov.in/s37bc1ec1d9c3426357e69acd5bf320061/uploads/2026/07/20260716131467523.pdf",
+          "year": 2026,
+          "title": "NEET (UG) 2026 Re-examination Final Answer Key",
+          "document_type": "answer_key",
+          "variant": "final",
+          "reliability": 0.999,
+          "matchable": false,
+          "unmatchable_reason": "No official question paper matching local Code50 identity is available.",
+          "note": "Official NTA final key for the 2026 re-examination (booklets 50/60/70/80); key alone is not question-text evidence.",
+          "identity": {
+            "exam": "NEET",
+            "authority": "neet.nta.nic.in",
+            "year": 2026,
+            "subject": null,
+            "booklet": "50",
+            "exam_cycle": "reexam",
+            "language": "English",
+            "document_type": "answer_key"
+          }
+        }
+      ]
+    }
+  ]
+}

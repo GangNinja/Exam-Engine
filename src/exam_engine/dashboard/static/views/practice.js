@@ -157,7 +157,16 @@ export function renderPractice(ctx) {
           ),
         ),
       );
-      formHost.append(renderGenerationForm(ctx, concepts, generatedHost, advancedHost));
+      formHost.append(
+        renderGenerationForm(
+          ctx,
+          concepts,
+          generatedHost,
+          advancedHost,
+          safeArray(options.formats),
+          safeArray(options.providers),
+        ),
+      );
     })
     .catch((error) => {
       if (isAbort(error)) return;
@@ -175,28 +184,33 @@ export function renderPractice(ctx) {
   return wrap;
 }
 
-function renderGenerationForm(ctx, concepts, generatedHost, advancedHost) {
+function renderGenerationForm(
+  ctx,
+  concepts,
+  generatedHost,
+  advancedHost,
+  formatSpecs = [],
+  providers = [],
+) {
+  const formatSupport = new Map(
+    formatSpecs
+      .filter((item) => item && item.format)
+      .map((item) => [item.format, item]),
+  );
+  const providerSupport = new Map(
+    providers.filter((item) => item && item.name).map((item) => [item.name, item]),
+  );
   const conceptSelect = selectControl(
-    concepts.map((concept) => ({
-      value: concept.concept_id,
-      label: `${concept.label}${concept.unit_label ? ` — ${concept.unit_label}` : ""}`,
-    })),
-    { value: concepts[0]?.concept_id, id: "generate-concept" },
+    [
+      { value: "__random__", label: "Random concept from this syllabus" },
+      ...concepts.map((concept) => ({
+        value: concept.concept_id,
+        label: `${concept.label}${concept.unit_label ? ` — ${concept.unit_label}` : ""}`,
+      })),
+    ],
+    { value: "__random__", id: "generate-concept" },
   );
   const syllabus = syllabusSelect(ctx, { onChange: () => ctx.reload() });
-  const formatSelect = selectControl(
-    FORMATS.map((value) => ({ value, label: humaniseCode(value) })),
-    { value: "short_answer", id: "generate-format" },
-  );
-  const bloomSelect = selectControl(
-    [{ value: "", label: "Format default" }, ...BLOOMS.map((value) => ({ value, label: humaniseCode(value) }))],
-    { value: "", id: "generate-bloom" },
-  );
-  const difficultySelect = selectControl(
-    [{ value: "", label: "Format default" }, ...DIFFICULTIES.map((value) => ({ value, label: humaniseCode(value) }))],
-    { value: "", id: "generate-difficulty" },
-  );
-  const countInput = inputControl({ type: "number", value: "3", min: "1", max: "20", id: "generate-count" });
   const providerSelect = selectControl(
     [
       { value: "template", label: "Offline template provider" },
@@ -204,6 +218,15 @@ function renderGenerationForm(ctx, concepts, generatedHost, advancedHost) {
     ],
     { value: "template", id: "generate-provider" },
   );
+  const formatSelect = selectControl([], { value: "short_answer", id: "generate-format" });
+  const bloomSelect = selectControl([], { value: "", id: "generate-bloom" });
+  const difficultySelect = selectControl(
+    [{ value: "", label: "Format default" }, ...DIFFICULTIES.map((value) => ({ value, label: humaniseCode(value) }))],
+    { value: "", id: "generate-difficulty" },
+  );
+  const countInput = inputControl({ type: "number", value: "3", min: "1", max: "20", id: "generate-count" });
+  const formatHint = h("p", { class: "muted form-hint", "aria-live": "polite" });
+  const providerHint = h("p", { class: "muted form-hint", "aria-live": "polite" });
   const includeKey = h("input", { type: "checkbox", checked: true, id: "generate-answer-key" });
   const expandBatch = h("input", {
     type: "checkbox",
@@ -217,20 +240,115 @@ function renderGenerationForm(ctx, concepts, generatedHost, advancedHost) {
     { class: "button button-primary", type: "submit" },
     h("span", { text: "Generate questions" }),
   );
+  function autoResolvesToTemplate() {
+    const auto = providerSupport.get("auto");
+    return (auto?.resolved_name || auto?.name) === "template";
+  }
+
+  function effectiveProvider(provider = providerSelect.value) {
+    return provider === "auto" && autoResolvesToTemplate() ? "template" : provider;
+  }
+
+  function formatUsable(value, provider = providerSelect.value) {
+    const spec = formatSupport.get(value);
+    const effective = effectiveProvider(provider);
+    if (!spec) {
+      if (value === "numerical") return effective !== "template";
+      return true;
+    }
+    if (effective === "template" && spec.requires_model) return false;
+    if (provider === "auto" && safeArray(spec.supported_by_provider).length === 0) return false;
+    return true;
+  }
+
+  function formatOptions() {
+    return FORMATS.map((value) => {
+      const usable = formatUsable(value);
+      const suffix = usable ? "" : " · unavailable with this provider";
+      return {
+        value,
+        label: `${humaniseCode(value)}${suffix}`,
+        disabled: !usable,
+      };
+    });
+  }
+
+  function availableBlooms(value = formatSelect.value) {
+    const spec = formatSupport.get(value);
+    if (!spec) return BLOOMS;
+    // Auto currently resolves to the deterministic template in local mode.  Offer
+    // only the Bloom levels that provider can actually build, otherwise the form
+    // permits a selection that the server must reject.
+    if (effectiveProvider() === "template") return safeArray(spec.blooms);
+    const supported = safeArray(spec.supported_by_provider);
+    return supported.length ? supported : safeArray(spec.blooms);
+  }
+
+  function bloomOptions(value = formatSelect.value) {
+    return [
+      { value: "", label: "Format default" },
+      ...availableBlooms(value).map((item) => ({ value: item, label: humaniseCode(item) })),
+    ];
+  }
+
+  function replaceOptions(select, options, fallback) {
+    const previous = select.value;
+    select.replaceChildren(
+      ...options.map((option) =>
+        h("option", {
+          value: option.value,
+          text: option.label,
+          disabled: option.disabled,
+        }),
+      ),
+    );
+    select.value = options.some((option) => option.value === previous && !option.disabled)
+      ? previous
+      : fallback;
+  }
+
+  function syncCompatibility() {
+    replaceOptions(formatSelect, formatOptions(), "short_answer");
+    replaceOptions(bloomSelect, bloomOptions(), "");
+    const selected = humaniseCode(formatSelect.value);
+    if (providerSelect.value === "template") {
+      providerHint.textContent =
+        "The offline template provider is deterministic and does not invent numerical problem statements.";
+    } else if (autoResolvesToTemplate()) {
+      providerHint.textContent =
+        "Auto currently resolves to the offline template; numerical formats remain unavailable.";
+    } else {
+      providerHint.textContent =
+        "Auto uses the configured model provider; numerical formats may be available.";
+    }
+    formatHint.textContent = formatUsable(formatSelect.value)
+      ? `${selected} is available with this provider. Bloom choices are limited to the levels it supports.`
+      : `${selected} is unavailable with this provider. Choose another format or provider.`;
+  }
+
+  providerSelect.addEventListener("change", syncCompatibility);
+  formatSelect.addEventListener("change", syncCompatibility);
+  syncCompatibility();
   const form = h(
     "form",
     { class: "form-grid" },
     syllabus,
-    field("Starting concept", conceptSelect, "The first question targets this concept."),
+    field(
+      "Starting concept",
+      conceptSelect,
+      "Choose a concept or let the generator pick a random one from this syllabus.",
+    ),
     field("Format", formatSelect),
-    field("Bloom level", bloomSelect),
+    formatHint,
+    field("Bloom level", bloomSelect, "Only levels supported by the selected format are listed."),
     field("Difficulty", difficultySelect),
     field(
       "Requested count",
       countInput,
       "1–20. If the count exceeds the selected concepts, the batch continues with other concepts instead of repeating one prompt.",
     ),
-    field("Provider", providerSelect, "The template provider is deterministic and offline."),
+    field("Provider", providerSelect),
+    providerHint,
     h(
       "label",
       { class: "checkbox-field" },
@@ -248,23 +366,42 @@ function renderGenerationForm(ctx, concepts, generatedHost, advancedHost) {
     status.textContent = "Generating, validating and checking for duplicates…";
     resultHost.replaceChildren();
     try {
+      if (!formatUsable(formatSelect.value)) {
+        throw new Error(formatHint.textContent || "That format is unavailable with this provider.");
+      }
+      if (
+        bloomSelect.value &&
+        !availableBlooms(formatSelect.value).includes(bloomSelect.value)
+      ) {
+        throw new Error("That Bloom level is not supported by the selected format.");
+      }
+      const selectedConcept =
+        conceptSelect.value === "__random__"
+          ? concepts[Math.floor(Math.random() * concepts.length)]
+          : concepts.find((item) => item.concept_id === conceptSelect.value) || concepts[0];
       const payload = {
         syllabus_id: selectedSyllabus(ctx),
-        concept_ids: [conceptSelect.value],
+        concept_ids: [selectedConcept.concept_id],
         count: Number(countInput.value) || 1,
         expand_batch: expandBatch.checked,
         format: formatSelect.value,
         provider: providerSelect.value,
+        seed: Math.floor(Math.random() * 1_000_000_000) + 1,
         include_answer_key: includeKey.checked,
       };
       if (bloomSelect.value) payload.bloom = bloomSelect.value;
       if (difficultySelect.value) payload.difficulty = difficultySelect.value;
-      const batch = await ctx.api.generate(ctx.courseId, payload, { signal: ctx.signal });
+      const batch = await ctx.api.generate(ctx.courseId, payload, {
+        signal: ctx.signal,
+        timeoutMs: 60000,
+      });
       status.dataset.tone = "positive";
       status.textContent = `Batch ${batch.batch_id} returned ${batch.counts?.persisted ?? 0} stored question(s).`;
-      resultHost.replaceChildren(renderBatch(ctx, batch, () => loadGenerated(ctx, generatedHost)));
-      loadGenerated(ctx, generatedHost);
-      loadAdvanced(ctx, advancedHost, () => loadGenerated(ctx, generatedHost));
+      const refreshBatch = () =>
+        loadGenerated(ctx, generatedHost, { batchId: batch.batch_id });
+      resultHost.replaceChildren(renderBatch(ctx, batch, refreshBatch));
+      refreshBatch();
+      loadAdvanced(ctx, advancedHost, refreshBatch);
       ctx.toast("Generation batch completed.", "positive");
     } catch (error) {
       if (isAbort(error)) return;
@@ -545,7 +682,7 @@ function renderBatch(ctx, batch, onReviewed) {
     h(
       "p",
       { class: "muted" },
-      `${batch.provider === "template" ? "Built-in local template" : humaniseCode(batch.provider)} · syllabus ${batch.scope?.syllabus_id || "—"} · requested ${counts.requested || 0}, generated ${counts.persisted || 0}, validated ${counts.validated || 0}, rejected ${counts.rejected || 0}, duplicates ${counts.duplicates || 0}. Each item starts as a draft.`,
+      `${batch.provider === "template" ? "Built-in local template" : humaniseCode(batch.provider)} · syllabus ${batch.scope?.syllabus_id || "—"} · requested ${counts.requested || 0}, generated ${counts.persisted || 0}, validated ${counts.validated || 0}, rejected ${counts.rejected || 0}, duplicates ${counts.duplicates || 0}. Each item starts as a Draft because generation never auto-approves; review it, then click Approve.`,
     ),
     h("p", { class: "scope-statement", text: batch.scope?.statement || "Scope statement unavailable." }),
     questions.length
@@ -626,6 +763,9 @@ function renderQuestion(ctx, question, onReviewed) {
   const headerStatus = h("div", { class: "question-badges" });
   const reviewBadge = statusBadge(reviewLabel(question.review_status), reviewTone(question.review_status));
   reviewBadge.dataset.reviewBadge = "true";
+  if (question.review_status === "pending_review") {
+    reviewBadge.title = "Draft: generated content stays pending until a human approves it.";
+  }
   const validationBadge = statusBadge(validationLabel(validation.status), validationTone(validation.status));
   headerStatus.append(validationBadge, reviewBadge);
 
@@ -684,6 +824,13 @@ function renderQuestion(ctx, question, onReviewed) {
       headerStatus,
     ),
     h("p", { class: "question-text", text: question.text }),
+    question.review_status === "pending_review"
+      ? h(
+          "p",
+          { class: "muted question-review-hint" },
+          "Draft means this generated question is waiting for a human review. It is not approved automatically; review it, then click Approve.",
+        )
+      : null,
     options.length
       ? h(
           "ol",
@@ -702,8 +849,8 @@ function renderQuestion(ctx, question, onReviewed) {
     question.answer_key
       ? h(
           "details",
-          { class: "disclosure", open: true },
-          h("summary", {}, h("strong", { text: "Reference answer and expected points" })),
+          { class: "disclosure", open: false },
+          h("summary", {}, h("strong", { text: "Show answer" })),
           h(
             "div",
             { class: "disclosure-body" },
@@ -720,8 +867,8 @@ function renderQuestion(ctx, question, onReviewed) {
       : safeArray(question.solution_steps).length
         ? h(
             "details",
-            { class: "disclosure", open: true },
-            h("summary", {}, h("strong", { text: "Rubric and review guidance" })),
+            { class: "disclosure", open: false },
+            h("summary", {}, h("strong", { text: "Show rubric and review guidance" })),
             h(
               "div",
               { class: "disclosure-body" },
@@ -921,11 +1068,10 @@ function renderAnswerCheck(ctx, question) {
     h("summary", {}, h("strong", { text: "Check your answer" })),
     h(
       "div",
-      { class: "disclosure-body" },
-      h(
+      { class: "disclosure-body" },        h(
         "p",
         { class: "muted",
-          text: "Local feedback only: multiple-choice answers use the stored key; written answers are checked for coverage of the stored reference and key ideas.",
+          text: "Local coverage check: multiple-choice answers use the stored key; written answers are compared with a stored outline. The result lists covered and missing key ideas; it is not a grade.",
         },
       ),
       form,
@@ -934,52 +1080,124 @@ function renderAnswerCheck(ctx, question) {
   );
 }
 
+function outlineStatusLabel(status) {
+  if (status === "covered") return "Covered";
+  if (status === "partial") return "Partly covered";
+  return "Not found";
+}
+
+function outlineStatusTone(status) {
+  if (status === "covered") return "positive";
+  if (status === "partial") return "caution";
+  return "neutral";
+}
+
+function coverageSummary(ideas) {
+  const total = Number(ideas.total) || 0;
+  const covered = Number(ideas.covered) || 0;
+  const partial = Number(ideas.partial) || 0;
+  const missing = Number(ideas.missing) || 0;
+  if (!total) return "No stored key-idea outline is available.";
+  const parts = [`${covered} of ${total} key idea${total === 1 ? "" : "s"} fully covered`];
+  if (partial) parts.push(`${partial} partly covered`);
+  if (missing) parts.push(`${missing} not found`);
+  return `${parts.join(" · ")}.`;
+}
+
 function renderGradeResult(result) {
   const positive = result.verdict === "correct" || result.verdict === "strong_match";
   const title =
     result.verdict === "correct"
-      ? "Correct"
-      : result.verdict === "strong_match"
-        ? "Strong coverage"
-        : result.verdict === "partial"
-          ? "Partly covered"
-          : result.verdict === "self_review"
-            ? "Self-check required"
-            : "Needs more detail";
-  const tone = positive ? "positive" : "caution";
-  const points = safeArray(result.expected_points);
+      ? "Matches the stored key"
+      : result.verdict === "incorrect"
+        ? "Does not match the stored key"
+        : result.verdict === "strong_match"
+          ? "Good coverage"
+          : result.verdict === "partial"
+            ? "Partly covered"
+            : result.verdict === "self_review"
+              ? "Compare with the outline"
+              : result.verdict === "answer_not_recognised"
+                ? "Choose an option"
+                : "Key ideas still missing";
+  const tone = positive ? "positive" : result.verdict === "self_review" ? "neutral" : "caution";
+  const coverage = result.coverage || {};
+  const ideas = coverage.key_ideas || {};
+  const outline = safeArray(result.expected_outline);
+  const total = Number(ideas.total) || outline.length;
   return h(
     "div",
     { class: "grade-result" },
     notice(result.feedback || "Answer checked.", tone, title),
-    result.score !== undefined && result.verdict !== "self_review"
+    total
       ? h(
-          "p",
-          { class: "grade-score" },
-          h("strong", { text: `${formatPercent(result.score, 0)} match` }),
-          h("span", {
+          "div",
+          { class: "grade-coverage" },
+          h("p", { class: "eyebrow", text: "Local coverage check · not a grade" }),
+          h("p", { class: "grade-coverage-summary", text: coverageSummary({ ...ideas, total }) }),
+          h("p", {
             class: "muted",
-            text: ` · ${formatNumber(result.awarded_score, 1)} / ${formatNumber(result.max_score, 1)} marks indicated`,
+            text:
+              "This compares words and phrases with the stored outline. It does not award marks or judge mathematical equivalence.",
           }),
         )
       : null,
-    points.length
+    outline.length
       ? h(
           "div",
           { class: "grade-points" },
           h("p", { class: "eyebrow", text: "Expected answer outline" }),
-          h("ul", { class: "compact-list" }, ...points.map((point) => h("li", { text: point }))),
+          h("p", {
+            class: "muted",
+            text: "Built from this question's stored steps and syllabus facets, not a model-generated marking scheme.",
+          }),
+          h(
+            "ol",
+            { class: "answer-outline" },
+            ...outline.map((item, index) => {
+              const status = ["covered", "partial", "missing"].includes(item.status)
+                ? item.status
+                : "missing";
+              const matched = safeArray(item.matched_terms);
+              const missing = safeArray(item.missing_terms);
+              return h(
+                "li",
+                { class: `answer-outline-item is-${status}` },
+                h(
+                  "div",
+                  { class: "answer-outline-head" },
+                  h("span", { class: "answer-outline-number", text: `${index + 1}.` }),
+                  h("span", { class: "answer-outline-point", text: item.point || "Stored outline point" }),
+                  statusBadge(outlineStatusLabel(status), outlineStatusTone(status)),
+                ),
+                status === "partial" && matched.length
+                  ? h("p", {
+                      class: "muted answer-outline-note",
+                      text: `Mentioned: ${matched.join(", ")}.`,
+                    })
+                  : null,
+                status !== "covered" && missing.length
+                  ? h("p", {
+                      class: "muted answer-outline-note",
+                      text: `Still to add: ${missing.join(", ")}.`,
+                    })
+                  : null,
+              );
+            }),
+          ),
         )
-      : null,
-    safeArray(result.missing_terms).length
-      ? h("p", { class: "muted", text: `Not found in your answer: ${result.missing_terms.join(", ")}.` })
       : null,
     result.reference_answer
       ? h(
           "details",
           { class: "disclosure" },
           h("summary", {}, h("strong", { text: "Stored answer guidance" })),
-          h("p", { text: result.reference_answer }),
+          h(
+            "div",
+            { class: "disclosure-body" },
+            h("p", { class: "muted", text: "Stored reference text; this is not a model grade." }),
+            h("p", { text: result.reference_answer }),
+          ),
         )
       : null,
     safeArray(result.limitations).length
@@ -988,12 +1206,20 @@ function renderGradeResult(result) {
   );
 }
 
-function loadGenerated(ctx, host) {
+function loadGenerated(ctx, host, { batchId = null } = {}) {
   host.replaceChildren(loadingPanel("Reading stored generated questions", 3));
   const filter = selectControl(
     [{ value: "", label: "All review states" }, ...REVIEW_STATUSES],
     { id: "generated-filter" },
   );
+  const showAll = batchId
+    ? h(
+        "button",
+        { class: "button button-ghost button-small", type: "button" },
+        h("span", { text: "View all stored questions" }),
+      )
+    : null;
+  if (showAll) showAll.addEventListener("click", () => loadGenerated(ctx, host));
   const listHost = h("div");
   filter.addEventListener("change", () => {
     draw(filter.value);
@@ -1001,13 +1227,29 @@ function loadGenerated(ctx, host) {
   function draw(status) {
     listHost.replaceChildren(inlineLoading("Filtering stored questions…"));
     ctx.api
-      .generated(ctx.courseId, { limit: 100, review_status: status || undefined }, { signal: ctx.signal })
+      .generated(
+        ctx.courseId,
+        {
+          limit: 100,
+          batch_id: batchId || undefined,
+          review_status: status || undefined,
+        },
+        { signal: ctx.signal },
+      )
       .then((payload) => {
         const questions = safeArray(payload.questions);
         listHost.replaceChildren(
           questions.length
             ? h("div", { class: "question-list" }, ...questions.map((question) => renderQuestion(ctx, question, () => draw(filter.value))))
-            : h("p", { class: "muted", text: "No stored generated question matches this filter." }),
+            : h(
+                "p",
+                {
+                  class: "muted",
+                  text: batchId
+                    ? "This generation batch did not store a question matching this filter."
+                    : "No stored generated question matches this filter.",
+                },
+              ),
         );
       })
       .catch((error) => {
@@ -1018,11 +1260,13 @@ function loadGenerated(ctx, host) {
   draw("");
   host.replaceChildren(
     panel(
-      "Stored generated questions",
+      batchId ? "New generation batch" : "Stored generated questions",
       {
-        eyebrow: "Review queue",
-        description: "Every item starts as a draft. Approve it when you are ready to use it; the decision is stored in its history.",
-        actions: [filter],
+        eyebrow: batchId ? "Latest generation" : "Review queue",
+        description: batchId
+          ? "Showing only questions from this generation batch. Previous stored questions are still available."
+          : "Every item starts as a draft. Approve it when you are ready to use it; the decision is stored in its history.",
+        actions: batchId ? [filter, showAll] : [filter],
       },
       listHost,
     ),
@@ -1031,7 +1275,7 @@ function loadGenerated(ctx, host) {
 
 function loadMisconceptions(ctx, host) {
   host.replaceChildren(loadingPanel("Reading misconception records", 3));
-  const listHost = h("div");
+  const listHost = h("div", { class: "view-stack" });
   const status = h("p", { class: "form-status", role: "status", "aria-live": "polite" });
   const mine = h("button", { class: "button button-ghost", type: "button" }, h("span", { text: "Mine stored responses" }));
   mine.addEventListener("click", async () => {
@@ -1060,6 +1304,23 @@ function loadMisconceptions(ctx, host) {
     .misconceptions(ctx.courseId, { limit: 100 }, { signal: ctx.signal })
     .then((payload) => {
       const rows = safeArray(payload.misconceptions);
+      listHost.replaceChildren(
+        rows.length
+          ? h("div", { class: "view-stack" }, ...rows.map((row) => renderMisconception(row)))
+          : h(
+              "div",
+              { class: "view-stack" },
+              notice(
+                "No misconception record is stored and none is invented. Import anonymised response data with the local command-line tool to mine evidence-backed patterns here.",
+                "neutral",
+                "No stored responses",
+              ),
+              h(
+                "pre",
+                { class: "code-block", text: "python -m exam_engine advanced responses import --course <course_id> --file responses.json" },
+              ),
+            ),
+      );
       host.replaceChildren(
         panel(
           "Misconception candidates",
@@ -1070,21 +1331,7 @@ function loadMisconceptions(ctx, host) {
             actions: [mine],
           },
           status,
-          rows.length
-            ? h("div", { class: "view-stack" }, ...rows.map((row) => renderMisconception(row)))
-            : h(
-                "div",
-                { class: "view-stack" },
-                notice(
-                  "No misconception record is stored and none is invented. Import anonymised response data with the local command-line tool to mine evidence-backed patterns here.",
-                  "neutral",
-                  "No stored responses",
-                ),
-                h(
-                  "pre",
-                  { class: "code-block", text: "python -m exam_engine advanced responses import --course <course_id> --file responses.json" },
-                ),
-              ),
+          listHost,
         ),
       );
     })

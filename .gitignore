@@ -21,6 +21,30 @@ data/
 # their licence clearly permits redistribution.
 datasets/external/
 
+# Personal examination corpus: read it in place, never redistribute it.
+datasets/GATE/
+datasets/BOARD EXAMS/
+datasets/JEE Advanced/
+datasets/JEE Mains/
+datasets/NEET/
+
+# Local database backups and generated dataset projections.
+/backups/
+/dataset_final*/
+
+# Scratch files, agent work areas and imported attachments.
+/tmp_*
+/work/
+/.cloud-attachments/
+
+# Generated reports and one-off documentation snapshots. README and the
+# maintained phase 1-12 notes remain tracked; phase 13 notes already in the
+# repository are left untouched.
+/reports/
+/PHASE_*.md
+/docs/phase-13-*.md
+/docs/phase-14*.md
+
 # Tool/agent state that is specific to this machine.
 .freebuff/
 .tmp-hairline/

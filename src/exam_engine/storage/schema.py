@@ -8,11 +8,13 @@ from __future__ import annotations
 
 from sqlalchemy import (
     Boolean,
+    Column,
     Float,
     ForeignKey,
     Index,
     Integer,
     LargeBinary,
+    Table,
     Text,
     UniqueConstraint,
     text,
@@ -895,6 +897,23 @@ class ExamPaperRow(Base):
     )
 
 
+class ExamPassageRow(Base):
+    __tablename__ = "exam_passages"
+
+    passage_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    course_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("courses.course_id", ondelete="CASCADE"), nullable=False
+    )
+    passage_text: Mapped[str] = mapped_column(Text, nullable=False)
+    source_reference: Mapped[str | None] = mapped_column(Text)
+    source_file: Mapped[str | None] = mapped_column(Text)
+    child_question_ids_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+    __table_args__ = (Index("idx_exam_passages_course_idx", "course_id"),)
+
+
 class ExamQuestionDetailRow(Base):
     __tablename__ = "exam_question_details"
 
@@ -916,14 +935,20 @@ class ExamQuestionDetailRow(Base):
     question_type_raw: Mapped[str | None] = mapped_column(Text)
     options_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     has_options: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    subparts_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     exam_year: Mapped[int | None] = mapped_column(Integer)
     source_file: Mapped[str] = mapped_column(Text, nullable=False)
+    passage_id: Mapped[str | None] = mapped_column(
+        Text, ForeignKey("exam_passages.passage_id", ondelete="SET NULL")
+    )
+    passage_order: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
 
     __table_args__ = (
         UniqueConstraint("course_id", "source_question_id", name="ux_exam_details_course_source"),
         Index("idx_exam_details_course_idx", "course_id", "exam_year", "question_type"),
         Index("idx_exam_details_paper_idx", "paper_id"),
+        Index("idx_exam_details_passage_idx", "passage_id", "passage_order"),
     )
 
 
@@ -949,6 +974,79 @@ class ExamAnswerRow(Base):
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
 
     __table_args__ = (Index("idx_exam_answers_course_idx", "course_id", "answer_type"),)
+
+
+class ExamProvenanceRow(Base):
+    """One evidence-bound provenance fact per document/paper/question/answer.
+
+    Nullable columns are deliberate: a corpus that never stated an authority,
+    paper code, booklet, language or retrieval date must store NULL rather than
+    an inferred value.
+    """
+
+    __tablename__ = "exam_provenance"
+
+    provenance_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    scope: Mapped[str] = mapped_column(Text, nullable=False)
+    course_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("courses.course_id", ondelete="CASCADE"), nullable=False
+    )
+    document_id: Mapped[str | None] = mapped_column(
+        Text, ForeignKey("documents.document_id", ondelete="CASCADE")
+    )
+    paper_id: Mapped[str | None] = mapped_column(
+        Text, ForeignKey("exam_papers.paper_id", ondelete="CASCADE")
+    )
+    question_id: Mapped[str | None] = mapped_column(
+        Text, ForeignKey("questions.question_id", ondelete="CASCADE")
+    )
+    answer_id: Mapped[str | None] = mapped_column(
+        Text, ForeignKey("exam_answers.answer_id", ondelete="CASCADE")
+    )
+    source_id: Mapped[str | None] = mapped_column(
+        Text, ForeignKey("dataset_sources.source_id", ondelete="SET NULL")
+    )
+    source_url: Mapped[str | None] = mapped_column(Text)
+    source_publisher: Mapped[str | None] = mapped_column(Text)
+    retrieved_at: Mapped[str | None] = mapped_column(Text)
+    source_document_sha256: Mapped[str | None] = mapped_column(Text)
+    examining_authority: Mapped[str | None] = mapped_column(Text)
+    examination_name: Mapped[str | None] = mapped_column(Text)
+    exam_year: Mapped[int | None] = mapped_column(Integer)
+    exam_session: Mapped[str | None] = mapped_column(Text)
+    subject_code: Mapped[str | None] = mapped_column(Text)
+    paper_code: Mapped[str | None] = mapped_column(Text)
+    set_code: Mapped[str | None] = mapped_column(Text)
+    region: Mapped[str | None] = mapped_column(Text)
+    language: Mapped[str | None] = mapped_column(Text)
+    original_question_id: Mapped[str | None] = mapped_column(Text)
+    original_option_ids_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    original_question_number: Mapped[str | None] = mapped_column(Text)
+    extraction_method: Mapped[str | None] = mapped_column(Text)
+    extraction_confidence: Mapped[float | None] = mapped_column(Float)
+    source_classification: Mapped[str] = mapped_column(Text, nullable=False, default="unknown")
+    identity_status: Mapped[str] = mapped_column(Text, nullable=False, default="unresolved")
+    paper_identity_status: Mapped[str] = mapped_column(Text, nullable=False, default="unresolved")
+    key_identity_status: Mapped[str] = mapped_column(
+        Text, nullable=False, default="not_applicable"
+    )
+    notes: Mapped[str | None] = mapped_column(Text)
+    evidence_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+    __table_args__ = (
+        Index("idx_exam_provenance_course", "course_id", "scope"),
+        Index("idx_exam_provenance_document", "document_id"),
+        Index("idx_exam_provenance_paper", "paper_id"),
+        Index("idx_exam_provenance_question", "question_id"),
+        Index("idx_exam_provenance_answer", "answer_id"),
+        Index(
+            "idx_exam_provenance_status",
+            "source_classification",
+            "identity_status",
+            "paper_identity_status",
+        ),
+    )
 
 
 class ExamImportRunRow(Base):
@@ -1035,6 +1133,244 @@ class MisconceptionRow(Base):
     )
 
 
+# Dataset Intelligence & Recovery tables. They are intentionally separate from
+# the source question/answer tables: recovery records are evidence and
+# proposals, not replacements for the immutable imported corpus.
+recovery_runs = Table(
+    "recovery_runs",
+    Base.metadata,
+    Column("run_id", Text, primary_key=True),
+    Column("started_at", Text, nullable=False),
+    Column("finished_at", Text),
+    Column("status", Text, nullable=False),
+    Column("mode", Text, nullable=False),
+    Column("dry_run", Integer, nullable=False, default=0),
+    Column("root", Text, nullable=False),
+    Column("recovery_version", Text, nullable=False),
+    Column("rule_version", Text, nullable=False),
+    Column("options_json", Text, nullable=False, default="{}"),
+    Column("totals_json", Text, nullable=False, default="{}"),
+    Column("warnings_json", Text, nullable=False, default="[]"),
+    Column("errors_json", Text, nullable=False, default="[]"),
+    Column("duration_ms", Integer, nullable=False, default=0),
+    Column("created_at", Text, nullable=False),
+)
+
+recovery_course_reports = Table(
+    "recovery_course_reports",
+    Base.metadata,
+    Column("run_id", Text, primary_key=True),
+    Column("course_id", Text, primary_key=True),
+    Column("course_code", Text, nullable=False),
+    Column("course_name", Text, nullable=False),
+    Column("category_id", Text, nullable=False),
+    Column("source_file", Text, nullable=False),
+    Column("source_sha256", Text, nullable=False),
+    Column("schema_json", Text, nullable=False, default="{}"),
+    Column("row_count", Integer, nullable=False, default=0),
+    Column("analyzed_count", Integer, nullable=False, default=0),
+    Column("status", Text, nullable=False),
+    Column("quality_json", Text, nullable=False, default="{}"),
+    Column("counts_json", Text, nullable=False, default="{}"),
+    Column("warnings_json", Text, nullable=False, default="[]"),
+    Column("errors_json", Text, nullable=False, default="[]"),
+    Column("duration_ms", Integer, nullable=False, default=0),
+    Column("created_at", Text, nullable=False),
+)
+
+recovery_records = Table(
+    "recovery_records",
+    Base.metadata,
+    Column("run_id", Text, primary_key=True),
+    Column("record_id", Text, primary_key=True),
+    Column("course_id", Text, nullable=False),
+    Column("source_file", Text, nullable=False),
+    Column("source_row", Integer, nullable=False),
+    Column("source_question_id", Text, nullable=False),
+    Column("source_sha256", Text, nullable=False),
+    Column("analysis_hash", Text, nullable=False),
+    Column("original_json", Text, nullable=False),
+    Column("normalized_json", Text, nullable=False),
+    Column("repaired_json", Text, nullable=False),
+    Column("structure_json", Text, nullable=False),
+    Column("quality_json", Text, nullable=False),
+    Column("verification_json", Text, nullable=False, default="{}"),
+    Column("answer_status", Text, nullable=False),
+    Column("source_fidelity", Text, nullable=False),
+    Column("release_status", Text, nullable=False),
+    Column("issue_count", Integer, nullable=False, default=0),
+    Column("blocking_count", Integer, nullable=False, default=0),
+    Column("created_at", Text, nullable=False),
+)
+
+recovery_issues = Table(
+    "recovery_issues",
+    Base.metadata,
+    Column("issue_id", Integer, primary_key=True, autoincrement=True),
+    Column("run_id", Text, nullable=False),
+    Column("course_id", Text, nullable=False),
+    Column("record_id", Text, nullable=False),
+    Column("code", Text, nullable=False),
+    Column("category", Text, nullable=False),
+    Column("severity", Text, nullable=False),
+    Column("message", Text, nullable=False),
+    Column("evidence_json", Text, nullable=False, default="{}"),
+    Column("confidence", Float, nullable=False, default=0.5),
+    Column("remediation", Text, nullable=False, default=""),
+    Column("blocking", Integer, nullable=False, default=0),
+    Column("field", Text),
+    Column("created_at", Text, nullable=False),
+)
+
+recovery_repairs = Table(
+    "recovery_repairs",
+    Base.metadata,
+    Column("repair_id", Integer, primary_key=True, autoincrement=True),
+    Column("run_id", Text, nullable=False),
+    Column("course_id", Text, nullable=False),
+    Column("record_id", Text, nullable=False),
+    Column("repair_type", Text, nullable=False),
+    Column("field", Text, nullable=False),
+    Column("before_json", Text, nullable=False, default="null"),
+    Column("after_json", Text, nullable=False, default="null"),
+    Column("method", Text, nullable=False),
+    Column("confidence", Float, nullable=False, default=0.5),
+    Column("risk", Text, nullable=False, default="low"),
+    Column("status", Text, nullable=False, default="proposed"),
+    Column("reason", Text, nullable=False, default=""),
+    Column("reviewer", Text),
+    Column("note", Text),
+    Column("created_at", Text, nullable=False),
+)
+
+recovery_answer_candidates = Table(
+    "recovery_answer_candidates",
+    Base.metadata,
+    Column("candidate_id", Integer, primary_key=True, autoincrement=True),
+    Column("run_id", Text, nullable=False),
+    Column("course_id", Text, nullable=False),
+    Column("record_id", Text, nullable=False),
+    Column("answer_text", Text),
+    Column("source_type", Text, nullable=False),
+    Column("source_name", Text, nullable=False),
+    Column("source_url", Text),
+    Column("source_reference", Text),
+    Column("verification_status", Text, nullable=False),
+    Column("confidence", Float, nullable=False, default=0.0),
+    Column("method", Text, nullable=False),
+    Column("evidence_json", Text, nullable=False, default="{}"),
+    Column("retrieved_at", Text, nullable=False),
+    Column("official", Integer, nullable=False, default=0),
+)
+
+recovery_source_documents = Table(
+    "recovery_source_documents",
+    Base.metadata,
+    Column("source_document_id", Integer, primary_key=True, autoincrement=True),
+    Column("run_id", Text, nullable=False),
+    Column("course_id", Text, nullable=False),
+    Column("path", Text, nullable=False),
+    Column("kind", Text, nullable=False),
+    Column("sha256", Text, nullable=False),
+    Column("page_count", Integer),
+    Column("text_chars", Integer),
+    Column("question_fidelity_available", Integer, nullable=False, default=0),
+    Column("metadata_json", Text, nullable=False, default="{}"),
+)
+
+recovery_source_candidates = Table(
+    "recovery_source_candidates",
+    Base.metadata,
+    Column("candidate_id", Integer, primary_key=True, autoincrement=True),
+    Column("run_id", Text, nullable=False),
+    Column("course_id", Text, nullable=False),
+    Column("source_id", Text, nullable=False),
+    Column("title", Text, nullable=False),
+    Column("url", Text, nullable=False),
+    Column("document_type", Text, nullable=False),
+    Column("source_tier", Integer, nullable=False),
+    Column("reliability", Float, nullable=False, default=0.0),
+    Column("provider", Text, nullable=False, default="unknown"),
+    Column("snippet", Text, nullable=False, default=""),
+    Column("query", Text, nullable=False, default=""),
+    Column("classification_reason", Text, nullable=False, default=""),
+    Column("retrieval_status", Text, nullable=False, default="discovered"),
+    Column("discovered_at", Text, nullable=False),
+    Column("evidence_json", Text, nullable=False, default="{}"),
+)
+
+recovery_verifications = Table(
+    "recovery_verifications",
+    Base.metadata,
+    Column("verification_id", Integer, primary_key=True, autoincrement=True),
+    Column("run_id", Text, nullable=False),
+    Column("course_id", Text, nullable=False),
+    Column("record_id", Text, nullable=False),
+    Column("status", Text, nullable=False),
+    Column("method", Text, nullable=False),
+    Column("confidence", Float, nullable=False, default=0.0),
+    Column("answer_text", Text),
+    Column("evidence_json", Text, nullable=False, default="{}"),
+    Column("issues_json", Text, nullable=False, default="[]"),
+    Column("independent", Integer, nullable=False, default=0),
+    Column("created_at", Text, nullable=False),
+)
+
+recovery_passages = Table(
+    "recovery_passages",
+    Base.metadata,
+    Column("passage_id", Text, primary_key=True),
+    Column("run_id", Text, primary_key=True),
+    Column("course_id", Text, primary_key=True),
+    Column("passage_text", Text, nullable=False),
+    Column("parent_record_id", Text),
+    Column("child_record_ids_json", Text, nullable=False, default="[]"),
+    Column("source_reference", Text),
+    Column("confidence", Float, nullable=False, default=0.0),
+    Column("evidence_json", Text, nullable=False, default="{}"),
+)
+
+recovery_retrieval_cache = Table(
+    "recovery_retrieval_cache",
+    Base.metadata,
+    Column("url", Text, primary_key=True),
+    Column("final_url", Text, nullable=False, default=""),
+    Column("title", Text, nullable=False, default=""),
+    Column("content_type", Text, nullable=False, default=""),
+    Column("text", Text, nullable=False, default=""),
+    Column("text_chars", Integer, nullable=False, default=0),
+    Column("sha256", Text, nullable=False, default=""),
+    Column("bytes_read", Integer, nullable=False, default=0),
+    Column("page_count", Integer),
+    Column("extraction_method", Text, nullable=False, default=""),
+    Column("http_status", Integer),
+    Column("warnings_json", Text, nullable=False, default="[]"),
+    Column("fetched_at", Text, nullable=False),
+    Column("status", Text, nullable=False, default="ok"),
+    Column("error", Text, nullable=False, default=""),
+    Column("markdown", Text, nullable=False, default=""),
+    Column("links_json", Text, nullable=False, default="[]"),
+    Column("tables_json", Text, nullable=False, default="[]"),
+    Column("metadata_json", Text, nullable=False, default="{}"),
+    Column("canonical_url", Text, nullable=False, default=""),
+    Column("crawler", Text, nullable=False, default="http"),
+    Column("browser_ms", Integer),
+)
+
+RECOVERY_TABLES = (
+    recovery_runs,
+    recovery_course_reports,
+    recovery_records,
+    recovery_issues,
+    recovery_repairs,
+    recovery_answer_candidates,
+    recovery_source_documents,
+    recovery_source_candidates,
+    recovery_verifications,
+    recovery_passages,
+    recovery_retrieval_cache,
+)
+
 DOMAIN_TABLES = (
     CourseRow.__table__,
     DatasetSourceRow.__table__,
@@ -1070,8 +1406,11 @@ DOMAIN_TABLES = (
     StudentResponseRow.__table__,
     MisconceptionRow.__table__,
     ExamPaperRow.__table__,
+    ExamPassageRow.__table__,
     ExamQuestionDetailRow.__table__,
     ExamAnswerRow.__table__,
+    ExamProvenanceRow.__table__,
     ExamImportRunRow.__table__,
     ExamImportFileRow.__table__,
+    *RECOVERY_TABLES,
 )

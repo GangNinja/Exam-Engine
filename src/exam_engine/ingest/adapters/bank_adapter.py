@@ -64,6 +64,8 @@ FIELD_ALIASES: dict[str, tuple[str, ...]] = {
     "solution_steps": ("solution_steps", "worked_solution"),
     "difficulty": ("difficulty", "level", "complexity"),
     "tags": ("tags", "keywords", "labels"),
+    "passage_id": ("passage_id", "passage", "passage_uid"),
+    "subparts_json": ("subparts_json", "subparts"),
 }
 
 _MAX_TEXT_CHARS = 20_000
@@ -327,6 +329,8 @@ def _build_question(
         "question_type",
         "options",
         "difficulty",
+        "passage_id",
+        "subparts_json",
     ):
         value = _clean(canonical.get(field))
         if value:

@@ -288,7 +288,6 @@ function renderDashboardBody(ctx, overview) {
               {
                 title: "Questions by recorded format",
                 description: "Counts use the stored question type; unknown formats remain visible.",
-                limit: 8,
                 valueFormat: (value) => formatInteger(value),
               },
             )

@@ -336,6 +336,57 @@ class GraphRepository:
             stmt = stmt.limit(limit)
         return [mappers.row_to_edge(row) for row in self.session.scalars(stmt).all()]
 
+    def status_nodes(
+        self, *, course_id: str | None = None
+    ) -> list[dict[str, object]]:
+        """Return only the fields needed by graph status, without ORM objects.
+
+        Status is requested on every dashboard bootstrap. Loading and mapping
+        full node models for all courses is unnecessarily expensive; this
+        projection keeps the same course scope and values.
+        """
+        stmt = select(
+            GraphNodeRow.node_id,
+            GraphNodeRow.course_id,
+            GraphNodeRow.node_type,
+            GraphNodeRow.label,
+        )
+        if course_id is not None:
+            stmt = stmt.where(GraphNodeRow.course_id == course_id)
+        rows = self.session.execute(stmt).all()
+        return [
+            {
+                "node_id": str(row.node_id),
+                "course_id": row.course_id,
+                "node_type": row.node_type,
+                "label": row.label or "",
+            }
+            for row in rows
+        ]
+
+    def status_edges(
+        self, *, course_id: str | None = None
+    ) -> list[dict[str, object]]:
+        """Return only the fields needed by graph status, without ORM objects."""
+        stmt = select(
+            GraphEdgeRow.course_id,
+            GraphEdgeRow.source_node_id,
+            GraphEdgeRow.target_node_id,
+            GraphEdgeRow.status,
+        )
+        if course_id is not None:
+            stmt = stmt.where(GraphEdgeRow.course_id == course_id)
+        rows = self.session.execute(stmt).all()
+        return [
+            {
+                "course_id": row.course_id,
+                "source_node_id": row.source_node_id,
+                "target_node_id": row.target_node_id,
+                "status": row.status,
+            }
+            for row in rows
+        ]
+
     def neighbors(
         self,
         node_id: str,

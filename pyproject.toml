@@ -23,6 +23,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+crawl = ["crawl4ai>=0.8,<0.9", "playwright>=1.45"]
 ocr = ["pytesseract>=0.3.10", "Pillow>=10.0"]
 neural = ["sentence-transformers>=2.7"]
 nlp-spacy = ["spacy>=3.7"]
@@ -37,6 +38,7 @@ where = ["src"]
 [tool.setuptools.package-data]
 exam_engine = [
     "storage/migrations/*.sql",
+    "recovery/*.json",
     "dashboard/static/*.html",
     "dashboard/static/*.css",
     "dashboard/static/*.svg",

@@ -24,6 +24,7 @@ from exam_engine.generation import (
     TemplateProvider,
     build_provider,
 )
+from exam_engine.generation.grading import grade_answer
 from exam_engine.generation.providers import masked_excerpt
 from exam_engine.generation.templates import format_support, template_for
 from exam_engine.generation.validation import ValidationContext, validate_question
@@ -355,6 +356,125 @@ def test_generation_is_reproducible_for_the_same_request(database: Database) -> 
     assert [item.text for item in first.questions] == [item.text for item in second.questions]
     stored = _service(database).list_questions(GenerationQuery(course_id=COURSE))
     assert len(stored) == 2
+
+
+def test_short_answer_seed_varies_question_wording(database: Database) -> None:
+    """A random seed can select another grounded wording instead of repeating one prompt."""
+
+    _seed(database)
+    first = _explain(
+        database,
+        concepts=["Stacks"],
+        count=1,
+        fmt=GenerationFormat.SHORT_ANSWER,
+        seed=11,
+    )
+    second = _explain(
+        database,
+        concepts=["Stacks"],
+        count=1,
+        fmt=GenerationFormat.SHORT_ANSWER,
+        seed=12,
+    )
+
+    assert first.questions and second.questions
+    assert first.questions[0].text != second.questions[0].text
+
+
+def test_answer_check_uses_stored_steps_as_a_coverage_outline() -> None:
+    question = _question(
+        answer_key="A stack removes the most recent item first.",
+        solution_steps=[
+            "Cover: A stack removes the most recent item.",
+            "Cover: Push adds an item to the top.",
+            "Connect these points to the unit.",
+        ],
+    )
+    result = grade_answer(
+        question,
+        answer="A stack removes the most recent item; push adds an item to the top.",
+    )
+
+    assert [item["point"] for item in result["expected_outline"]] == [
+        "A stack removes the most recent item",
+        "Push adds an item to the top",
+    ]
+    assert all(item["status"] == "covered" for item in result["expected_outline"])
+    assert result["coverage"]["key_ideas"] == {
+        "covered": 2,
+        "partial": 0,
+        "missing": 0,
+        "total": 2,
+    }
+    assert "awarded_score" not in result
+    assert "max_score" not in result
+    assert "not a grade" in result["feedback"]
+
+
+def test_answer_check_matches_plurals_and_curated_synonyms() -> None:
+    question = _question(
+        answer_key="Matrices have rows and columns; a stack removes the most recent item.",
+        solution_steps=[
+            "Cover: A matrix has rows and columns.",
+            "Cover: A stack removes the most recent item.",
+        ],
+    )
+    result = grade_answer(
+        question,
+        answer="Matrices have rows and columns; stacks delete the most recent item.",
+    )
+
+    assert result["verdict"] == "strong_match"
+    assert result["coverage"]["key_ideas"] == {
+        "covered": 2,
+        "partial": 0,
+        "missing": 0,
+        "total": 2,
+    }
+    assert result["coverage"]["method"] == "lexical_coverage"
+    assert "awarded_score" not in result
+    assert "max_score" not in result
+    limitations = " ".join(result["limitations"]).casefold()
+    assert "plural" in limitations
+    assert "synonym" in limitations
+
+
+def test_answer_check_does_not_infer_meaning_beyond_its_lexical_rules() -> None:
+    question = _question(
+        solution_steps=[
+            "Cover: The derivative measures the instantaneous rate of change.",
+        ],
+    )
+    result = grade_answer(
+        question,
+        answer="The integral measures the average area under a curve.",
+    )
+
+    point = result["expected_outline"][0]
+    assert point["status"] == "partial"
+    assert "derivative" in point["missing_terms"]
+    assert "measures" in result["matched_terms"]
+    assert "awarded_score" not in result
+    assert "max_score" not in result
+
+
+def test_multiple_choice_outline_reports_the_stored_key_without_marks() -> None:
+    question = _question(
+        fmt=GenerationFormat.MULTIPLE_CHOICE,
+        options=[
+            GeneratedOption(key="A", text="Last in, first out"),
+            GeneratedOption(key="B", text="First in, first out"),
+        ],
+        correct_key="A",
+        answer_key="Last in, first out",
+    )
+    result = grade_answer(question, option_key="B")
+
+    assert result["verdict"] == "incorrect"
+    assert result["expected_outline"][0]["status"] == "missing"
+    assert result["coverage"]["key_ideas"]["covered"] == 0
+    assert "awarded_score" not in result
+    assert "max_score" not in result
 
 
 def test_unknown_course_is_rejected(database: Database) -> None:

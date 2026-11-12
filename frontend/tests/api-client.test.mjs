@@ -73,6 +73,59 @@ test("GET retries one network failure, mutations never retry", async () => {
   }
 });
 
+test("tutor streaming parses split SSE frames and resolves the final payload", async () => {
+  const original = globalThis.fetch;
+  const encoder = new TextEncoder();
+  const frames = [
+    'event: status\ndata: {"stage":"model","message":"Asking the model"}\n\n',
+    'event: answer\ndata: {"text":"Hello "}\n\nevent: answer\ndata: {"text":"there"}\n\n',
+    'event: result\ndata: {"status":"answered","answer":"Hello there"}\n\n',
+  ];
+  let requestedUrl = "";
+  globalThis.fetch = async (url, options) => {
+    requestedUrl = url;
+    assert.equal(options.headers.Accept, "text/event-stream");
+    const stream = new ReadableStream({
+      start(controller) {
+        for (const frame of frames) {
+          const middle = Math.floor(frame.length / 2);
+          controller.enqueue(encoder.encode(frame.slice(0, middle)));
+          controller.enqueue(encoder.encode(frame.slice(middle)));
+        }
+        controller.close();
+      },
+    });
+    return new Response(stream, {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream" },
+    });
+  };
+  try {
+    const api = createApi();
+    const events = [];
+    const result = await api.tutorAskStream(
+      "course/one",
+      { question: "Explain stacks" },
+      { onEvent: (event) => events.push(event) },
+    );
+    assert.equal(requestedUrl, "/api/courses/course%2Fone/tutor/ask/stream");
+    assert.deepEqual(
+      events.map((event) => event.event),
+      ["status", "answer", "answer"],
+    );
+    assert.equal(
+      events
+        .filter((event) => event.event === "answer")
+        .map((event) => event.data.text)
+        .join(""),
+      "Hello there",
+    );
+    assert.deepEqual(result, { status: "answered", answer: "Hello there" });
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
 test("a non-JSON success response is rejected rather than parsed loosely", async () => {
   const original = globalThis.fetch;
   globalThis.fetch = async () =>

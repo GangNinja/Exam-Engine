@@ -31,6 +31,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from sqlalchemy import func, select
+
 from exam_engine.analytics.metadata import ExamPeriod, resolve_exam_period
 from exam_engine.config import AnalyticsSettings
 from exam_engine.models.analytics import (
@@ -83,6 +85,7 @@ from exam_engine.models.understanding import (
     TypeLabel,
     UnitMatch,
 )
+from exam_engine.nlp.concept_quality import concept_noise_reason
 from exam_engine.storage.db import Database
 from exam_engine.storage.question_repositories import QuestionUnderstandingRepository
 from exam_engine.storage.repositories import (
@@ -91,6 +94,8 @@ from exam_engine.storage.repositories import (
     QuestionRepository,
     SyllabusRepository,
 )
+from exam_engine.storage.schema import ExamPaperRow, ExamQuestionDetailRow
+from exam_engine.understanding.classification import difficulty_band
 from exam_engine.understanding.similarity import normalise_question_text
 
 logger = logging.getLogger(__name__)
@@ -187,7 +192,10 @@ class _QuestionContext:
             return "not analysed"
         if self.primary_match is None:
             return "unmapped"
-        return self.primary_match.topic or "unassigned"
+        topic = self.primary_match.topic
+        if not topic or concept_noise_reason(topic) is not None:
+            return "unassigned"
+        return topic
 
     @property
     def type_label(self) -> str:
@@ -206,6 +214,8 @@ class _QuestionContext:
 class _CourseData:
     course: CourseRecord
     documents: list[DocumentRecord]
+    papers: int
+    paper_by_question: dict[str, tuple[str, int | None]]
     questions: list[QuestionRecord]
     analyses: dict[str, QuestionAnalysis]
     matches: dict[str, list[UnitMatch]]
@@ -302,6 +312,34 @@ def _share_of_marks(value: float, total: float) -> float | None:
 class AnalyticsService:
     """Build deterministic analytics reports from stored records."""
 
+    def _resolved_difficulty_from_analysis(
+        self, analysis: QuestionAnalysis | None
+    ) -> DifficultyLabel | None:
+        """Resolve a stored UNKNOWN through its already-computed score.
+
+        Older Phase 3 rows were produced before the classifier stopped treating
+        missing type/Bloom cues as a reason to discard a valid text score. This
+        read-time fallback keeps those rows usable without rewriting the store.
+        """
+        if analysis is None:
+            return None
+        if analysis.difficulty_label is not DifficultyLabel.UNKNOWN:
+            return analysis.difficulty_label
+        if analysis.word_count <= 0:
+            return DifficultyLabel.UNKNOWN
+        return difficulty_band(
+            analysis.difficulty_score,
+            easy_below=self.settings.difficulty_easy_below,
+            hard_above=self.settings.difficulty_hard_above,
+        )
+
+    def _resolved_difficulty(self, item: _QuestionContext) -> DifficultyLabel | None:
+        return self._resolved_difficulty_from_analysis(item.analysis)
+
+    def _difficulty_label(self, item: _QuestionContext) -> str:
+        label = self._resolved_difficulty(item)
+        return label.value if label is not None else "unknown"
+
     def __init__(self, database: Database, settings: AnalyticsSettings | None = None) -> None:
         self.db = database
         self.settings = settings or AnalyticsSettings()
@@ -376,9 +414,29 @@ class AnalyticsService:
         periods = {
             document.document_id: resolve_exam_period(document, course) for document in documents
         }
+        paper_count = int(
+            session.scalar(
+                select(func.count()).select_from(ExamPaperRow).where(
+                    ExamPaperRow.course_id == course_id
+                )
+            )
+            or 0
+        )
+        paper_by_question = {
+            row[0]: (row[1], int(row[2]) if row[2] is not None else None)
+            for row in session.execute(
+                select(
+                    ExamQuestionDetailRow.question_id,
+                    ExamQuestionDetailRow.paper_id,
+                    ExamQuestionDetailRow.exam_year,
+                ).where(ExamQuestionDetailRow.course_id == course_id)
+            ).all()
+        }
         return _CourseData(
             course=course,
             documents=documents,
+            papers=paper_count,
+            paper_by_question=paper_by_question,
             questions=questions,
             analyses=analyses,
             matches=dict(matches),
@@ -547,7 +605,8 @@ class AnalyticsService:
             if wanted_types and (analysis is None or analysis.primary_type not in wanted_types):
                 continue
             if wanted_difficulties and (
-                analysis is None or analysis.difficulty_label not in wanted_difficulties
+                analysis is None
+                or self._resolved_difficulty_from_analysis(analysis) not in wanted_difficulties
             ):
                 continue
             if filters.marks_min is not None and (
@@ -558,11 +617,23 @@ class AnalyticsService:
                 question.marks is None or question.marks > filters.marks_max
             ):
                 continue
+            period = data.periods[document.document_id]
+            paper = data.paper_by_question.get(question.question_id)
+            if paper is not None and paper[1] is not None and not period.known:
+                year = paper[1]
+                period = ExamPeriod(
+                    label=str(year),
+                    source="exam_paper_year",
+                    sort_key=f"{year:04d}",
+                    session=None,
+                    exam_type=None,
+                    known=True,
+                )
             contexts.append(
                 _QuestionContext(
                     question=question,
                     document=document,
-                    period=data.periods[document.document_id],
+                    period=period,
                     analysis=analysis,
                     matches=matches,
                     types=tuple(data.types.get(question.question_id, [])),
@@ -768,7 +839,8 @@ class AnalyticsService:
             total_questions=len(contexts),
             distinct_question_texts=len(by_fingerprint),
             documents=len(documents_with_questions),
-            question_papers=len(
+            question_papers=data.papers
+            or len(
                 {
                     item.document.document_id
                     for item in contexts
@@ -815,8 +887,12 @@ class AnalyticsService:
             if len({match.unit_id for match in item.assigned_matches}) > 1
         }
         topic_keys_by_question: dict[str, set[str]] = defaultdict(set)
+        invalid_topic_matches = 0
         for item in contexts:
             for match in item.assigned_matches:
+                if match.topic is not None and concept_noise_reason(match.topic) is not None:
+                    invalid_topic_matches += 1
+                    continue
                 if match.topic is not None:
                     topic_keys_by_question[item.question.question_id].add(
                         _normalise_topic(match.topic)
@@ -827,7 +903,11 @@ class AnalyticsService:
         unassigned_topic = {
             item.question.question_id
             for item in contexts
-            if item.assigned_matches and any(match.topic is None for match in item.assigned_matches)
+            if item.assigned_matches
+            and any(
+                match.topic is None or concept_noise_reason(match.topic) is not None
+                for match in item.assigned_matches
+            )
         }
 
         unit_stats: dict[str, dict[str, Any]] = {}
@@ -889,6 +969,8 @@ class AnalyticsService:
         for item in contexts:
             seen: set[tuple[str, str | None]] = set()
             for match in item.assigned_matches:
+                if match.topic is not None and concept_noise_reason(match.topic) is not None:
+                    continue
                 key = (match.unit_id, _normalise_topic(match.topic) if match.topic else None)
                 if key in seen:
                     continue
@@ -932,7 +1014,7 @@ class AnalyticsService:
         for item in contexts:
             seen_concepts: set[str] = set()
             for match in item.assigned_matches:
-                if match.topic is None:
+                if match.topic is None or concept_noise_reason(match.topic) is not None:
                     continue
                 normalized = _normalise_topic(match.topic)
                 if normalized in seen_concepts:
@@ -979,6 +1061,16 @@ class AnalyticsService:
         )
 
         warnings: list[Uncertainty] = []
+        if invalid_topic_matches:
+            warnings.append(
+                _warning(
+                    "invalid_topic_labels",
+                    f"{invalid_topic_matches} mapping label(s) were excluded from topic "
+                    "analytics because they are option/page/instruction fragments",
+                    severity=Severity.INFO,
+                    detail={"excluded_matches": invalid_topic_matches},
+                )
+            )
         if total and not data.units:
             warnings.append(
                 _warning(
@@ -1006,9 +1098,16 @@ class AnalyticsService:
             questions_with_any_topic=sum(
                 1
                 for item in contexts
-                if any(match.topic is not None for match in item.assigned_matches)
+                if any(
+                    match.topic is not None and concept_noise_reason(match.topic) is None
+                    for match in item.assigned_matches
+                )
             ),
-            topic_assignments=sum(1 for match in selected_matches if match.topic is not None),
+            topic_assignments=sum(
+                1
+                for match in selected_matches
+                if match.topic is not None and concept_noise_reason(match.topic) is None
+            ),
             multi_topic_questions=len(multi_topic),
             unassigned_topic_questions=len(unassigned_topic),
             mapping_coverage=_share(len(questions_with_unit), total),
@@ -1056,7 +1155,11 @@ class AnalyticsService:
                     else None
                 ),
                 question_type=item.primary_type.value if item.primary_type else None,
-                difficulty=(item.primary_difficulty.value if item.primary_difficulty else None),
+                difficulty=(
+                    self._resolved_difficulty(item).value
+                    if self._resolved_difficulty(item) is not None
+                    else None
+                ),
             )
             for item in marked
             if item.question.marks is not None
@@ -1084,7 +1187,7 @@ class AnalyticsService:
         by_topic = self._marks_breakdown(contexts, lambda item: item.topic_label, total_marks)
         by_type = self._marks_breakdown(contexts, lambda item: item.type_label, total_marks)
         by_difficulty = self._marks_breakdown(
-            contexts, lambda item: item.difficulty_label, total_marks
+            contexts, self._difficulty_label, total_marks
         )
 
         subpart_mismatches: list[MarksAnomaly] = []
@@ -1295,7 +1398,7 @@ class AnalyticsService:
         estimated = 0
         for item in analyses:
             assert item.analysis is not None
-            label = item.analysis.difficulty_label
+            label = self._resolved_difficulty(item) or DifficultyLabel.UNKNOWN
             counts[label.value] += 1
             if item.difficulty is not None and item.difficulty.estimated:
                 estimated += 1
@@ -1407,7 +1510,7 @@ class AnalyticsService:
             units = Counter(item.unit_label for item in items)
             topics = Counter(item.topic_label for item in items)
             types = Counter(item.type_label for item in items)
-            difficulties = Counter(item.difficulty_label for item in items)
+            difficulties = Counter(self._difficulty_label(item) for item in items)
             marks = [item.question.marks for item in items if item.question.marks is not None]
             period_sessions = {
                 item.period.session_key for item in items if item.period.session_key is not None
@@ -1604,7 +1707,7 @@ class AnalyticsService:
         for item in contexts:
             seen: set[str] = set()
             for match in item.assigned_matches:
-                if match.topic is None:
+                if match.topic is None or concept_noise_reason(match.topic) is not None:
                     continue
                 normalized = _normalise_topic(match.topic)
                 if not normalized or normalized in seen:
@@ -1840,7 +1943,7 @@ class AnalyticsService:
                     < self.settings.low_confidence_threshold
                 )
                 or (
-                    item.analysis.difficulty_label is not DifficultyLabel.UNKNOWN
+                    self._resolved_difficulty(item) is not DifficultyLabel.UNKNOWN
                     and item.analysis.difficulty_confidence < self.settings.low_confidence_threshold
                 )
                 or (
@@ -1909,7 +2012,8 @@ class AnalyticsService:
             distinct_question_texts=repetition.distinct_question_texts,
             documents=len(selected_documents),
             documents_with_questions=len({item.document.document_id for item in contexts}),
-            question_papers=sum(
+            question_papers=data.papers
+            or sum(
                 document.kind is DocumentKind.QUESTION_PAPER for document in selected_documents
             ),
             question_banks=sum(

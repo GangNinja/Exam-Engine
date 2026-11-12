@@ -43,6 +43,7 @@ from exam_engine.models.nlp import (
     make_keyphrase_id,
 )
 from exam_engine.models.question import Uncertainty
+from exam_engine.nlp.concept_quality import concept_noise_reason
 from exam_engine.nlp.embeddings import EmbeddingChoice, resolve_provider
 from exam_engine.nlp.entities import build_extractor, entity_records, lexical_extraction_note
 from exam_engine.nlp.keywords import (
@@ -183,16 +184,26 @@ class NlpService:
 
         report.finished_at = utcnow()
         report.duration_ms = int((time.perf_counter() - started) * 1000)
-        if report.status is NlpStatus.OK and report.warnings:
+        if report.status is NlpStatus.OK and any(
+            warning.severity in {Severity.WARNING, Severity.ERROR} for warning in report.warnings
+        ):
             report.status = NlpStatus.PARTIAL
         self._finish_run(report)
         return report
 
-    def status(self) -> list[dict[str, Any]]:
-        """Per-course coverage of derived NLP data (for ``nlp status``)."""
+    def status(self, course_id: str | None = None) -> list[dict[str, Any]]:
+        """Per-course coverage of derived NLP data (for ``nlp status``).
+
+        Pass ``course_id`` when callers only need one course so the status scan
+        does not touch every other course in a large corpus.
+        """
         rows: list[dict[str, Any]] = []
         with self.db.session() as session:
-            courses = CourseRepository(session).list()
+            if course_id:
+                course = CourseRepository(session).get(course_id)
+                courses = [course] if course else []
+            else:
+                courses = CourseRepository(session).list()
             texts = ProcessedTextRepository(session)
             keyphrases = KeyphraseRepository(session)
             entities = EntityRepository(session)
@@ -658,6 +669,8 @@ class NlpService:
         seen: set[str] = set()
         for unit in bundle.units:
             for topic in unit.topics:
+                if concept_noise_reason(topic) is not None:
+                    continue
                 normalized = normalize_term(topic)
                 if not normalized or normalized in seen:
                     continue
@@ -696,7 +709,7 @@ class NlpService:
         if scored:
             highest = max(record.score for record in scored) or 1.0
             for record in sorted(scored, key=lambda r: -r.score)[: self.settings.top_k]:
-                if record.normalized in seen:
+                if record.normalized in seen or concept_noise_reason(record.term) is not None:
                     continue
                 seen.add(record.normalized)
                 confidence = 0.35 + 0.4 * (record.score / highest if highest else 0.0)
@@ -719,7 +732,11 @@ class NlpService:
             if entity.label not in {"METHOD", "TECHNIQUE", "ACRONYM", "NOTATION"}:
                 continue
             normalized = normalize_term(entity.text)
-            if not normalized or normalized in seen:
+            if (
+                not normalized
+                or normalized in seen
+                or concept_noise_reason(entity.text) is not None
+            ):
                 continue
             seen.add(normalized)
             concepts.append(
