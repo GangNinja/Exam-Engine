@@ -653,7 +653,7 @@ python -m pytest --cov=exam_engine --cov-report=term-missing
 python -m ruff check src tests tools
 python -m ruff format --check src tests tools
 python -m mypy
-cd frontend && npm ci && npm run check:assets && npm test   # 17 Node tests
+cd frontend && npm ci && npm run check:assets && npm test   # 34 Node tests
 ```
 
 The dashboard has no frontend build step. A separate `npm run test:browser`
