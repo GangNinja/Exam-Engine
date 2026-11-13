@@ -64,3 +64,12 @@ node_modules/
 # Operating-system and editor noise.
 .DS_Store
 Thumbs.db
+.idea/
+.vscode/
+
+# Local server logs and browser-test artefacts.
+*.log
+frontend/test-results/
+frontend/playwright-report/
+test-results/
+playwright-report/

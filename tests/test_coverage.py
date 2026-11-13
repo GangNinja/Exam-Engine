@@ -529,7 +529,41 @@ def test_duplicate_source_records_do_not_inflate_documents_sources_or_sessions()
         database.close()
 
 
-def test_single_mapped_question_is_low_coverage_not_covered() -> None:
+def test_single_mapped_question_is_low_coverage_when_confidence_is_weak() -> None:
+    database = memory_database()
+    try:
+        _add_course(database)
+        syllabus = _add_syllabus(database)
+        questions = _five_questions(database)
+        _add_analysis(
+            database,
+            COURSE,
+            syllabus,
+            questions["q1"],
+            status=MappingStatus.MAPPED,
+            matches=[("Arrays", "tfidf", 0.18, 1, "")],
+        )
+        for question_id in ("q2", "q3", "q4", "q5"):
+            _add_analysis(
+                database,
+                COURSE,
+                syllabus,
+                questions[question_id],
+                status=MappingStatus.UNMAPPED,
+            )
+
+        report = _report(database, syllabus=syllabus)
+        arrays = next(item for item in report.concepts if item.label == "Arrays")
+        assert arrays.status is CoverageStatus.LOW_COVERAGE
+        assert report.summary.covered_concepts == 0
+        assert report.summary.low_coverage_concepts == 1
+        assert "below the configured covered minimum 2" in arrays.reasons[0]
+        assert "single-mapping threshold" in arrays.reasons[2]
+    finally:
+        database.close()
+
+
+def test_single_mapped_question_with_confident_evidence_is_covered() -> None:
     database = memory_database()
     try:
         _add_course(database)
@@ -554,10 +588,10 @@ def test_single_mapped_question_is_low_coverage_not_covered() -> None:
 
         report = _report(database, syllabus=syllabus)
         arrays = next(item for item in report.concepts if item.label == "Arrays")
-        assert arrays.status is CoverageStatus.LOW_COVERAGE
-        assert report.summary.covered_concepts == 0
-        assert report.summary.low_coverage_concepts == 1
-        assert "below the configured covered minimum 2" in arrays.reasons[0]
+        assert arrays.status is CoverageStatus.COVERED
+        assert arrays.distinct_question_count == 1
+        assert "single-mapping confidence threshold" in arrays.reasons[0]
+        assert report.summary.covered_concepts == 1
     finally:
         database.close()
 
@@ -706,12 +740,12 @@ def test_multiple_units_are_scoped_and_rates_use_the_right_denominators() -> Non
         assert unit_one.unit_label == "Unit 1"
         assert unit_one.concept_count == 2
         assert unit_one.distinct_question_count == 2
-        assert unit_one.concept_coverage_rate == 0.0
+        assert unit_one.concept_coverage_rate == 1.0
         assert unit_two.unit_label == "Unit 2"
         assert unit_two.concept_count == 2
         assert unit_two.distinct_question_count == 3
-        assert unit_two.concept_coverage_rate == 0.5
-        assert report.summary.concept_coverage_rate == 0.25
+        assert unit_two.concept_coverage_rate == 1.0
+        assert report.summary.concept_coverage_rate == 1.0
         assert report.summary.mapped_questions == 5
         assert report.summary.mapped_question_rate == 1.0
     finally:
@@ -1031,7 +1065,11 @@ def test_low_confidence_accepted_mappings_are_uncertain_even_when_plural() -> No
                 status=MappingStatus.UNMAPPED,
             )
 
-        report = _report(database, syllabus=syllabus)
+        report = _report(
+            database,
+            syllabus=syllabus,
+            settings=replace(CoverageSettings(), low_confidence_threshold=0.4),
+        )
         arrays = next(item for item in report.concepts if item.label == "Arrays")
         assert arrays.status is CoverageStatus.UNCERTAIN
         assert arrays.distinct_question_count == 2
@@ -1205,7 +1243,7 @@ def test_small_corpus_prevents_absence_claim_but_keeps_positive_evidence() -> No
         report = _report(database, syllabus=syllabus)
         arrays = next(item for item in report.concepts if item.label == "Arrays")
         trees = next(item for item in report.concepts if item.label == "Trees")
-        assert arrays.status is CoverageStatus.LOW_COVERAGE
+        assert arrays.status is CoverageStatus.COVERED
         assert trees.status is CoverageStatus.UNCERTAIN
         assert report.status is CoverageReportStatus.PARTIAL
         assert report.data_quality.small_corpus is True

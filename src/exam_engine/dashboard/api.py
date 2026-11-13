@@ -1171,11 +1171,6 @@ class DashboardAPI:
             ).analyze(request)
         payload = _dump(profile)
         payload["view"] = self._view(query)
-        if payload["view"] == "summary":
-            truncation: dict[str, Any] = {}
-            _trim(payload, ("patterns",), 100, truncation)
-            _trim(payload, ("question_groups",), 100, truncation)
-            payload["truncation"] = truncation
         return payload
 
     def _evolution(self, course_id: str, query: dict[str, list[str]]) -> dict[str, Any]:

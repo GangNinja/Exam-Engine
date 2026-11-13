@@ -30,6 +30,7 @@ import {
   syllabusSelect,
   tabs,
   truncationNotice,
+  unitAssignmentSummary,
 } from "./shared.js";
 
 const TREND_CHANGE_LIMIT = 5000;
@@ -415,13 +416,30 @@ function renderConceptFindings(report) {
 
 function renderDistribution(ctx, host) {
   host.append(loadingPanel("Computing question-paper analytics", 4));
-  ctx.api
-    .analytics(
+  const syllabusId = selectedSyllabus(ctx);
+  const coveragePromise = syllabusId
+    ? ctx.api
+        .coverage(
+          ctx.courseId,
+          { syllabus_id: syllabusId, view: "summary", limit: 1 },
+          { signal: ctx.signal },
+        )
+        .catch((error) => {
+          if (isAbort(error)) throw error;
+          return null;
+        })
+    : Promise.resolve(null);
+  Promise.all([
+    ctx.api.analytics(
       ctx.courseId,
       { view: "summary", trend_changes_limit: TREND_CHANGE_LIMIT },
       { signal: ctx.signal },
+    ),
+    coveragePromise,
+  ])
+    .then(([report, coverage]) =>
+      host.replaceChildren(renderDistributionReport(ctx, report, coverage)),
     )
-    .then((report) => host.replaceChildren(renderDistributionReport(ctx, report)))
     .catch((error) => {
       if (isAbort(error)) return;
       host.replaceChildren(
@@ -433,14 +451,18 @@ function renderDistribution(ctx, host) {
     });
 }
 
-function renderDistributionReport(ctx, report) {
+function renderDistributionReport(ctx, report, coverage = null) {
   const wrap = h("div", { class: "view-stack" });
   const quality = report.data_quality || {};
+  const assignment = unitAssignmentSummary(coverage);
   wrap.append(
     metrics([
       { label: "Questions", value: formatInteger(quality.questions) },
       { label: "Analysed", value: formatPercent(quality.analysis_coverage, 0) },
-      { label: "Mapped", value: formatPercent(quality.mapping_coverage, 0) },
+      {
+        label: "Unit assignment",
+        value: formatPercent(coverage ? assignment.rate : quality.mapping_coverage, 0),
+      },
       { label: "Marks known", value: formatPercent(quality.marks_coverage, 0) },
       { label: "Papers", value: formatInteger(quality.question_papers) },
       {
@@ -463,7 +485,12 @@ function renderDistributionReport(ctx, report) {
   const reportTruncation = truncationNotice(report);
   if (reportTruncation) wrap.append(reportTruncation);
 
-  const units = safeArray(report.mapping?.units);
+  const units = assignment.rows.length
+    ? assignment.rows
+    : safeArray(report.mapping?.units).map((unit) => ({
+        label: unit.unit_label,
+        value: unit.question_count,
+      }));
   const types = safeArray(report.question_types?.primary_labels);
   const difficulty = safeArray(report.difficulty?.labels);
   const marks = report.marks || {};
@@ -505,11 +532,15 @@ function renderDistributionReport(ctx, report) {
       { class: "chart-grid" },
       panel(
         "Questions per unit",
-        { eyebrow: "Evidence scope", description: "Ambiguous questions can appear in more than one bucket." },
-        barChart(
-          units.map((row) => ({ label: row.unit_label, value: row.question_count })),
-          { title: "Questions per syllabus unit", description: `${plural(units.length, "unit")} observed.`, limit: 14 },
-        ),
+        {
+          eyebrow: "Evidence scope",
+          description:
+            "Every analysed question receives a deterministic best-fit unit from the complete coverage review table; a concept spanning units can count in more than one bucket.",
+        },
+        barChart(units, {
+          title: "Questions per syllabus unit",
+          description: `${plural(units.length, "unit")} observed.`,
+        }),
       ),
       panel(
         "Primary question types",
@@ -726,10 +757,13 @@ function renderExamDnaReport(profile) {
       { label: "Recurring", value: formatInteger(summary.recurring_pattern_count) },
     ]),
   );
+  const totalQuestions = Number(summary.questions) || 0;
+  const analysedQuestions = Number(summary.analysed_questions) || 0;
+  const analysisComplete = totalQuestions > 0 && analysedQuestions >= totalQuestions;
   wrap.append(
     notice(
-      `Profile status: ${humaniseCode(profile.status)}. Recurrence is historical: ${summary.recurring_pattern_count} pattern(s) clear both the paper minimum and the recurrence threshold.`,
-      profile.status === "ok" ? "neutral" : "caution",
+      `Question analysis: ${totalQuestions === 0 ? "No eligible questions" : analysisComplete ? "Complete" : "Partial"} — ${formatInteger(analysedQuestions)} of ${formatInteger(totalQuestions)} question(s) analysed. Recurrence is historical: ${summary.recurring_pattern_count} pattern(s) clear both the paper minimum and the recurrence threshold.`,
+      analysisComplete || totalQuestions === 0 ? "neutral" : "caution",
     ),
   );
   const profileTruncation = truncationNotice(profile);
@@ -747,22 +781,13 @@ function renderExamDnaReport(profile) {
         barChart(distributionRows(distributions.question_types), { title: "Question types across eligible papers", limit: 12 }),
       ),
       panel(
-        "Bloom mix",
-        {
-          eyebrow: "Estimated",
-          description: "Estimated Bloom candidates, not examiner-validated levels; low-confidence fallbacks are included.",
-        },
-        barChart(distributionRows(distributions.bloom_levels), { title: "Bloom levels across eligible papers", limit: 8 }),
-      ),
-      panel(
         "Unit emphasis",
-        { eyebrow: "Marks and questions", description: "Only matches to the selected syllabus version are counted." },
-        barChart(distributionRows(distributions.units), { title: "Questions per unit", limit: 14 }),
-      ),
-      panel(
-        "Command verbs",
-        { eyebrow: "Wording cues", description: "Observed verbs; ambiguous cues remain reported, not interpreted." },
-        barChart(distributionRows(distributions.command_verbs), { title: "Command verbs", limit: 12 }),
+        {
+          eyebrow: "Marks and questions",
+          description:
+            "Every analysed question receives a deterministic best-fit unit from the complete coverage review table; a concept spanning units can count in more than one bucket.",
+        },
+        barChart(distributionRows(distributions.units), { title: "Questions per unit" }),
       ),
     ),
   );

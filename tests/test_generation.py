@@ -439,6 +439,57 @@ def test_answer_check_matches_plurals_and_curated_synonyms() -> None:
     assert "synonym" in limitations
 
 
+def test_answer_check_scores_a_paraphrased_explanation_instead_of_requiring_the_outline() -> None:
+    question = _question(
+        solution_steps=[
+            "Define Principles of topographic, cadastral, engineering in one clear sentence.",
+            (
+                "Explain the key ideas: coordinate system; distance and angle measurement; "
+                "levelling and trigonometric levelling; traversing and triangulation survey; "
+                "total station; introduction to cartography, map projections."
+            ),
+            "Connect the ideas and support the answer with one course-grounded example.",
+        ],
+    )
+    result = grade_answer(
+        question,
+        answer=(
+            "Topographic surveying determines the shape and features of the ground and represents "
+            "them on maps. Cadastral surveying establishes land parcel boundaries, ownership and "
+            "areas. Engineering surveying provides the control and measurements needed to design, "
+            "set out and monitor infrastructure. These applications share a coordinate system, "
+            "distance and angle observations, levelling and trigonometric levelling, traversing "
+            "and triangulation, total-station observations, and cartography with map projections. "
+            "For example, a total station is used with levelling to set out a road centreline."
+        ),
+    )
+
+    assert result["score"] > 0
+    assert result["verdict"] in {"strong_match", "partial"}
+    assert any(item["status"] == "covered" for item in result["expected_outline"])
+    assert result["coverage"]["key_ideas"]["missing"] == 0
+    # The generic third instruction is not a scored key idea.
+    assert result["coverage"]["key_ideas"]["total"] == 2
+
+
+def test_answer_check_falls_back_when_stored_steps_are_only_instructions() -> None:
+    question = _question(
+        solution_steps=[
+            "Define Stacks in one clear sentence.",
+            "Explain the key ideas behind it and how they relate.",
+            "Connect the ideas and support the answer with one course-grounded example.",
+        ],
+    )
+    result = grade_answer(
+        question,
+        answer="A stack is a linear structure that removes the most recently added item first.",
+    )
+
+    assert result["score"] > 0
+    assert result["coverage"]["key_ideas"]["total"] >= 1
+    assert result["coverage"]["key_ideas"]["covered"] >= 1
+
+
 def test_answer_check_does_not_infer_meaning_beyond_its_lexical_rules() -> None:
     question = _question(
         solution_steps=[

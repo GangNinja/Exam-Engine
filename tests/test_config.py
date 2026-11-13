@@ -184,6 +184,8 @@ def test_coverage_settings_are_configurable_and_bounded() -> None:
     defaults = Settings.from_env({}).coverage
     assert defaults == CoverageSettings()
     assert defaults.covered_min_questions == 2
+    assert defaults.low_confidence_threshold == 0.18
+    assert defaults.single_mapping_confidence_threshold == 0.19
     assert defaults.mapping_confidence_floor == 0.18
     assert defaults.small_corpus_questions == 5
     assert defaults.include_graph_explicit_mappings is True
@@ -192,6 +194,7 @@ def test_coverage_settings_are_configurable_and_bounded() -> None:
             "EXAM_ENGINE_Q7_MAX_QUESTIONS": "40",
             "EXAM_ENGINE_Q7_COVERED_MIN_QUESTIONS": "3",
             "EXAM_ENGINE_Q7_LOW_CONFIDENCE": "0.6",
+            "EXAM_ENGINE_Q7_SINGLE_MAPPING_CONFIDENCE": "0.3",
             "EXAM_ENGINE_Q7_MAPPING_CONFIDENCE_FLOOR": "0.25",
             "EXAM_ENGINE_Q7_SMALL_CORPUS": "8",
             "EXAM_ENGINE_Q7_MIN_ANALYSIS_COVERAGE": "0.9",
@@ -201,12 +204,13 @@ def test_coverage_settings_are_configurable_and_bounded() -> None:
     assert settings.coverage.max_questions == 40
     assert settings.coverage.covered_min_questions == 3
     assert settings.coverage.low_confidence_threshold == 0.6
+    assert settings.coverage.single_mapping_confidence_threshold == 0.3
     assert settings.coverage.mapping_confidence_floor == 0.25
     assert settings.coverage.small_corpus_questions == 8
     assert settings.coverage.min_analysis_coverage == 0.9
     assert settings.coverage.include_graph_explicit_mappings is False
     invalid = Settings.from_env({"EXAM_ENGINE_Q7_LOW_CONFIDENCE": "2"})
-    assert invalid.coverage.low_confidence_threshold == 0.5
+    assert invalid.coverage.low_confidence_threshold == 0.18
     moved = Settings.from_env({}).with_coverage(covered_min_questions=4)
     assert moved.coverage.covered_min_questions == 4
     assert Settings.from_env({}).coverage.covered_min_questions == 2
