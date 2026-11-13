@@ -88,15 +88,17 @@ not evidence about the selected unit; the report adds a limitation explaining it
 
 | Status | Rule | Meaning |
 |---|---|---|
-| `covered` | At least `covered_min_questions` distinct questions have accepted mappings and the average accepted score is at least `low_confidence_threshold` | Confident representation in the available corpus |
-| `low_coverage` | At least one accepted mapping, but fewer than the covered minimum | Observed, but limited, representation |
+| `covered` | At least `covered_min_questions` distinct questions have accepted mappings and the average accepted score is at least `low_confidence_threshold`; or one accepted mapping meets `single_mapping_confidence_threshold` | Confident representation in the available corpus |
+| `low_coverage` | At least one accepted mapping, but fewer than the covered minimum and below the single-mapping confidence threshold | Observed, but limited, representation |
 | `unmapped` | No accepted mapping, enough analysed questions and analysis coverage | Not represented by confidently mapped questions here |
 | `uncertain` | Candidate mappings exist but none accepted; or accepted mappings average below the confidence threshold; or the corpus/analysis coverage is too limited to conclude absence | Evidence insufficient for a confident class |
 | `insufficient_data` | No usable questions, no Phase 3 analysis, or no usable syllabus concepts | The analysis cannot be performed reliably |
 
-The low-coverage threshold is `covered_min_questions` (default 2). A count below
-it is not proof that a concept is unimportant. `unmapped` is not a synonym for
-"never examined" or "out of syllabus".
+The low-coverage threshold is `covered_min_questions` (default 2). A single
+accepted mapping is promoted to covered only when its average score reaches
+`single_mapping_confidence_threshold` (default 0.19); otherwise it remains low
+coverage. A count below the threshold is not proof that a concept is unimportant.
+`unmapped` is not a synonym for "never examined" or "out of syllabus".
 
 Overall report status:
 
@@ -263,7 +265,8 @@ Abbreviated example (values from a deterministic synthetic test fixture):
   "filters": {},
   "parameters": {
     "covered_min_questions": 2,
-    "low_confidence_threshold": 0.5,
+    "low_confidence_threshold": 0.18,
+    "single_mapping_confidence_threshold": 0.19,
     "mapping_confidence_floor": 0.18,
     "small_corpus_questions": 5,
     "min_analysis_coverage": 0.8,
@@ -425,7 +428,8 @@ Concept/unit lookup by unknown id prints `not_found`.
 |---|---|---|
 | `EXAM_ENGINE_Q7_MAX_QUESTIONS` | `20000` | Maximum selected questions; truncation is reported |
 | `EXAM_ENGINE_Q7_COVERED_MIN_QUESTIONS` | `2` | Distinct accepted questions required for `covered` |
-| `EXAM_ENGINE_Q7_LOW_CONFIDENCE` | `0.5` | Average accepted score below this makes coverage `uncertain` |
+| `EXAM_ENGINE_Q7_LOW_CONFIDENCE` | `0.18` | Average accepted score below this makes coverage `uncertain` |
+| `EXAM_ENGINE_Q7_SINGLE_MAPPING_CONFIDENCE` | `0.19` | Score required for one accepted mapping to count as `covered` |
 | `EXAM_ENGINE_Q7_MAPPING_CONFIDENCE_FLOOR` | `0.18` | Minimum persisted Phase 3 score accepted as mapping evidence |
 | `EXAM_ENGINE_Q7_SMALL_CORPUS` | `5` | Corpus below this cannot support absence claims |
 | `EXAM_ENGINE_Q7_MIN_ANALYSIS_COVERAGE` | `0.8` | Minimum fraction of questions with Phase 3 analysis for a confident negative |

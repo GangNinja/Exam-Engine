@@ -68,6 +68,11 @@ belong to another version is counted in
 produces `exam_dna_mixed_syllabus_versions` instead of being silently merged into
 the selected version's unit profile.
 
+For unit distributions and per-paper unit counts only, a question with no
+confident Phase 3 match receives the deterministic best-fit unit from Phase 7's
+complete coverage review table. This keeps every analysed question visible while
+`mapping_status`, unit patterns and mapping-quality counts remain strict.
+
 Filters:
 
 | Filter | Effect |
@@ -121,8 +126,9 @@ For every eligible paper the profile records:
 * primary question-type counts;
 * primary Bloom-level counts;
 * difficulty-label counts;
-* unit question counts and unit marks (a question counts once per unit; marks are
-  not split between units or concepts);
+* unit question counts and unit marks (a question counts once per review
+  assignment; best-fit review assignments fill questions without a confident
+  Phase 3 match, and marks are not split between units or concepts);
 * section labels from stored question metadata;
 * command-verb counts;
 * explicit optional/compulsory instructions.

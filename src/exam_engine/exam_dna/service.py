@@ -141,6 +141,8 @@ class _PaperQuestion:
     command_verb: str | None
     choice_rules: tuple[ExamDnaChoiceRule, ...]
     concepts: set[str] = field(default_factory=set)
+    review_matches: tuple[UnitMatch, ...] = ()
+    foreign_syllabus_only: bool = False
 
     @property
     def assigned_matches(self) -> tuple[UnitMatch, ...]:
@@ -151,6 +153,16 @@ class _PaperQuestion:
         if self.analysis.mapping_status is MappingStatus.AMBIGUOUS:
             return self.matches
         return ()
+
+    @property
+    def unit_matches(self) -> tuple[UnitMatch, ...]:
+        """Assignments used by unit distributions.
+
+        The complete coverage review table supplies one deterministic best-fit
+        unit for every question, including questions Phase 3 left unmapped. The
+        strict Phase 3 assignment still governs patterns and mapping status.
+        """
+        return self.review_matches or self.assigned_matches
 
     @property
     def primary_type(self) -> QuestionType | None:
@@ -390,6 +402,7 @@ class ExamDnaService:
             loaded, coverage.syllabus.syllabus_id
         )
         self._attach_concepts(loaded, coverage)
+        self._attach_unit_assignments(loaded, coverage)
 
         distributions = self._distributions(eligible)
         sessions, trends = self._session_series(eligible)
@@ -802,7 +815,7 @@ class ExamDnaService:
         )
         service = CoverageService(self.db, self.coverage_settings)
         try:
-            return service.analyze(coverage_request)
+            return service.analyze(coverage_request, include_question_assignments=True)
         except CoverageError as exc:
             payload = exc.as_dict()
             raise ExamDnaError(
@@ -830,10 +843,65 @@ class ExamDnaService:
                 item.matches = selected
                 if selected:
                     continue
-                if paper.eligible and paper.document.kind is DocumentKind.QUESTION_PAPER:
+                if (
+                    paper.eligible
+                    and paper.document.kind is DocumentKind.QUESTION_PAPER
+                    and not item.foreign_syllabus_only
+                ):
+                    item.foreign_syllabus_only = True
                     foreign_questions += 1
                     foreign_documents.add(paper.document.document_id)
         return foreign_questions, len(foreign_documents)
+
+    def _attach_unit_assignments(self, loaded: _Loaded, coverage: CoverageReport) -> None:
+        """Give every question a deterministic unit for unit distributions.
+
+        Phase 7's complete review table already computes one conservative
+        best-fit concept for every question. For unit distributions only, that
+        concept supplies the review unit, including questions Phase 3 left
+        unmapped. The stored mapping status is not changed; strict Phase 3
+        assignments still govern patterns and mapping quality.
+        """
+        assignments = {item.question_id: item for item in coverage.question_assignments}
+        for paper in loaded.papers:
+            for item in paper.questions:
+                if item.foreign_syllabus_only:
+                    continue
+                assignment = assignments.get(item.question.question_id)
+                if assignment is None or not assignment.unit_ids:
+                    continue
+                labels = list(assignment.unit_labels)
+                matches: list[UnitMatch] = []
+                for index, unit_id in enumerate(assignment.unit_ids):
+                    label = (
+                        labels[index]
+                        if index < len(labels)
+                        else unit_id
+                    )
+                    matches.append(
+                        UnitMatch(
+                            match_id=(
+                                f"best_fit_unit:{item.question.question_id}:"
+                                f"{unit_id}"
+                            ),
+                            question_id=item.question.question_id,
+                            course_id=loaded.course.course_id,
+                            unit_id=unit_id,
+                            syllabus_id=coverage.syllabus.syllabus_id,
+                            unit_label=label,
+                            topic=assignment.concept_label,
+                            score=assignment.score or 0.0,
+                            rank=index + 1,
+                            method="best_fit_unit_assignment",
+                            matched_terms=list(assignment.matched_terms),
+                            evidence=[
+                                *assignment.evidence,
+                                "best_fit_review_assignment",
+                                f"phase7_source:{assignment.assignment_source}",
+                            ],
+                        )
+                    )
+                item.review_matches = tuple(matches)
 
     def _attach_concepts(self, loaded: _Loaded, coverage: CoverageReport) -> None:
         concepts_by_question: dict[str, set[str]] = defaultdict(set)
@@ -853,13 +921,13 @@ class ExamDnaService:
         bloom_counts = Counter(_bloom_label(item) for item in questions)
         difficulty_counts = Counter(_difficulty_label(item) for item in questions)
         unit_counts = Counter(
-            match.unit_label for item in questions for match in item.assigned_matches
+            match.unit_label for item in questions for match in item.unit_matches
         )
         unit_marks: dict[str, float] = defaultdict(float)
         for item in questions:
             if item.question.marks is None:
                 continue
-            for unit_label in {match.unit_label for match in item.assigned_matches}:
+            for unit_label in {match.unit_label for match in item.unit_matches}:
                 unit_marks[unit_label] += item.question.marks
         sections = sorted({item.question.section for item in questions if item.question.section})
         verbs = Counter(item.command_verb for item in questions if item.command_verb)
@@ -929,7 +997,7 @@ class ExamDnaService:
             self._dist_add(type_acc[_type_label(item)], item)
             self._dist_add(bloom_acc[_bloom_label(item)], item)
             self._dist_add(difficulty_acc[_difficulty_label(item)], item)
-            for unit_label in {match.unit_label for match in item.assigned_matches}:
+            for unit_label in {match.unit_label for match in item.unit_matches}:
                 self._dist_add(unit_acc[unit_label], item)
             if item.question.section:
                 self._dist_add(section_acc[item.question.section], item)

@@ -603,8 +603,10 @@ no compression. Demo corpus: 2 courses / 7 documents. Times are wall-clock from
   job pool and per-request SQLite connections that are closed in `finally`.
 
 These numbers describe the extractive fallback on a synthetic local corpus and
-are not a production throughput claim. A real `qwen3:8b` answer took 116.3 s on
-the development machine; the UI timeout is 240 s. Local-model latency is
+are not a production throughput claim. A real `qwen3:8b` answer previously took
+116.3 s on the development machine. The tutor now composes a cited web answer
+first and caps the optional local-model fallback at 10 seconds by default, so
+normal answers do not wait for model generation. Local-model latency is
 hardware-dependent and is not represented in the table. There is no HTTP
 compression, caching layer or CDN.
 
@@ -673,11 +675,12 @@ models, dashboard API/tutor, Practice and workspace views, styles and tests.
 3. **No forecasting or autonomous approval.** Open-ended conversation is
    available when a model is configured, but reports describe only the available
    corpus and never predict a future paper.
-4. **Model answers can be wrong or slow.** The tutor prefers a local Ollama
-   model; its answers may use general subject knowledge when stored and web
-   sources are thin, and a local answer can take up to the configured timeout
-   (240 seconds by default). The extractive fallback is bounded by the analysed
-   corpus. Concept resolution inherits Phase 2/5 identity quality.
+4. **Model answers can be wrong or slow.** The tutor composes a cited web answer
+   before starting a model. The optional local Ollama or OpenAI-compatible model
+   remains a fallback, capped at the configured timeout (10 seconds by default),
+   and its answers may use general subject knowledge when stored and web sources
+   are thin. The extractive fallback is bounded by the analysed corpus. Concept
+   resolution inherits Phase 2/5 identity quality.
 5. **Browser coverage is a narrow smoke test, not a full E2E suite.** It covers
    the Practice answer-check and Draft approval flows against a seeded database.
    Accessibility was checked structurally and by keyboard/theme review, not by a

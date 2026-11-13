@@ -1142,12 +1142,25 @@ class CoverageService:
                     ],
                     warnings,
                 )
-            if len(accepted) >= self.settings.covered_min_questions:
-                reasons = [
-                    f"{len(accepted)} distinct question(s) have accepted mappings; "
-                    f"the configured covered minimum is "
-                    f"{self.settings.covered_min_questions}."
-                ]
+            single_confident = (
+                len(accepted) == 1
+                and average is not None
+                and average >= self.settings.single_mapping_confidence_threshold
+            )
+            if len(accepted) >= self.settings.covered_min_questions or single_confident:
+                if len(accepted) >= self.settings.covered_min_questions:
+                    reasons = [
+                        f"{len(accepted)} distinct question(s) have accepted mappings; "
+                        f"the configured covered minimum is "
+                        f"{self.settings.covered_min_questions}."
+                    ]
+                else:
+                    reasons = [
+                        "1 distinct question has an accepted mapping at "
+                        f"{average:.3f} confidence, meeting the configured "
+                        "single-mapping confidence threshold "
+                        f"{self.settings.single_mapping_confidence_threshold:.3f}."
+                    ]
                 if average is not None:
                     reasons.append(f"Average accepted mapping confidence is {average:.3f}.")
                 if candidates:
@@ -1168,7 +1181,13 @@ class CoverageService:
                 "Low question representation is reported descriptively; it does not mean "
                 "the concept is unimportant.",
             ]
-            if average is not None:
+            if len(accepted) == 1 and average is not None:
+                reasons.append(
+                    "The single accepted mapping averages "
+                    f"{average:.3f} confidence, below the configured single-mapping "
+                    f"threshold {self.settings.single_mapping_confidence_threshold:.3f}."
+                )
+            elif average is not None:
                 reasons.append(f"Average accepted mapping confidence is {average:.3f}.")
             return CoverageStatus.LOW_COVERAGE, reasons, warnings
 
@@ -1425,7 +1444,9 @@ class CoverageService:
         for concept in concepts.values():
             for unit_id in concept.unit_ids:
                 unit_concepts[unit_id].append(concept)
-        ordered_concepts = sorted(concepts.values(), key=lambda item: (item.label.casefold(), item.concept_id))
+        ordered_concepts = sorted(
+            concepts.values(), key=lambda item: (item.label.casefold(), item.concept_id)
+        )
 
         def display_confidence(score: float | None) -> float:
             evidence = max(0.0, min(1.0, (score or 0.0) / 0.5))
@@ -2019,6 +2040,9 @@ class CoverageService:
             "question_assignments": include_question_assignments,
             "covered_min_questions": self.settings.covered_min_questions,
             "low_confidence_threshold": self.settings.low_confidence_threshold,
+            "single_mapping_confidence_threshold": (
+                self.settings.single_mapping_confidence_threshold
+            ),
             "mapping_confidence_floor": self.settings.mapping_confidence_floor,
             "small_corpus_questions": self.settings.small_corpus_questions,
             "min_analysis_coverage": self.settings.min_analysis_coverage,

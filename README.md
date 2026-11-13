@@ -53,8 +53,10 @@ insufficient-data concepts without treating absence as proof. Phase 8 adds a
 read-only Exam DNA profile: paper- and session-level distributions of question
 types, marks, units, Bloom levels, sections and command verbs, recurring-pattern
 denominators, and clearly separated exact/near/semantic/concept-related question
-groups. It never turns historical frequency into a forecast. Phase 9 adds a
-read-only concept evolution tracker: per-document date provenance, concept
+groups. It never turns historical frequency into a forecast. The dashboard
+surfaces the question-type mix and unit emphasis; unit charts use the complete
+review-only assignment table, while strict Phase 3 mapping counts remain separate.
+Phase 9 adds a read-only concept evolution tracker: per-document date provenance, concept
 timelines, review-only change events for terminology, context, syllabus placement
 and assessment emphasis, version comparisons, and relationship changes observed in
 the graph. It describes evolution inside the analysed corpus and never rewrites a
@@ -316,7 +318,10 @@ item enters the same human review queue as a Draft. Multi-question requests can
 continue across other in-scope concepts, and stored cards offer a local "Check
 your answer" study aid. Long analyses run as background jobs and
 are polled by the UI; optional illustrations and the avatar are lazy-loaded and
-never block the underlying feature. See
+never block the underlying feature. Exam DNA and Paper analyzer unit charts use
+Phase 7's complete review-assignment table, so every analysed question is
+represented; strict Phase 3 match counts remain visible as a separate quality
+signal. See
 [docs/phase-12-dashboard-and-tutor.md](docs/phase-12-dashboard-and-tutor.md) for
 the API surface, licence decisions and measured results.
 
@@ -501,7 +506,7 @@ src/exam_engine/
 tools/build_sample_dataset.py   regenerates the synthetic sample dataset
 datasets/sample/                committed synthetic sample + manifest
 datasets/analytics_sample/      synthetic three-session fixture for Phase 4/tests
-tests/                          743 tests across models, adapters, segmentation, storage, pipeline, NLP, understanding, analytics, graph, prerequisites, coverage, Exam DNA, concept evolution, question generation, advanced assessment, recovery, CLI, artefacts and the dashboard API
+tests/                          749 tests across models, adapters, segmentation, storage, pipeline, NLP, understanding, analytics, graph, prerequisites, coverage, Exam DNA, concept evolution, question generation, advanced assessment, recovery, CLI, artefacts and the dashboard API
 ```
 
 Deeper design notes: [docs/phase-1-ingestion.md](docs/phase-1-ingestion.md),
@@ -581,7 +586,8 @@ Dataset/licensing workflow: [docs/datasets.md](docs/datasets.md).
 | `EXAM_ENGINE_Q6_PATH_MAX_DEPTH` | `8` | Default prerequisite hops in a learning path |
 | `EXAM_ENGINE_Q7_MAX_QUESTIONS` | `20000` | Questions per coverage analysis |
 | `EXAM_ENGINE_Q7_COVERED_MIN_QUESTIONS` | `2` | Distinct accepted questions required for `covered` |
-| `EXAM_ENGINE_Q7_LOW_CONFIDENCE` | `0.5` | Average accepted mapping score below this makes coverage uncertain |
+| `EXAM_ENGINE_Q7_LOW_CONFIDENCE` | `0.18` | Average accepted mapping score below this makes coverage uncertain |
+| `EXAM_ENGINE_Q7_SINGLE_MAPPING_CONFIDENCE` | `0.19` | Confidence needed for one accepted question to count as covered |
 | `EXAM_ENGINE_Q7_MAPPING_CONFIDENCE_FLOOR` | `0.18` | Minimum persisted Phase 3 mapping score accepted as evidence |
 | `EXAM_ENGINE_Q7_SMALL_CORPUS` | `5` | Corpus size below which absence claims are uncertain |
 | `EXAM_ENGINE_Q7_MIN_ANALYSIS_COVERAGE` | `0.8` | Minimum Phase 3 analysis coverage for a confident negative |
@@ -635,9 +641,10 @@ Dataset/licensing workflow: [docs/datasets.md](docs/datasets.md).
 | `EXAM_ENGINE_TUTOR_OLLAMA_URL` | `http://127.0.0.1:11434` | Local Ollama endpoint |
 | `EXAM_ENGINE_TUTOR_MODEL` | unset | Preferred tutor model; otherwise a local model is auto-detected |
 | `EXAM_ENGINE_TUTOR_LLM_BASE_URL` | unset | OpenAI-compatible endpoint for a remote tutor model |
-| `EXAM_ENGINE_TUTOR_TIMEOUT` | `240` | Tutor model timeout, seconds |
-| `EXAM_ENGINE_TUTOR_WEB_SEARCH` | `auto` | `auto`, `exa`, `wikipedia` or `off` |
-| `EXAM_ENGINE_TUTOR_WEB_SOURCES` | `2` | Web sources attached to one answer (maximum 6) |
+| `EXAM_ENGINE_TUTOR_TIMEOUT` | `10` | Maximum tutor model timeout, seconds |
+| `EXAM_ENGINE_TUTOR_WEB_FIRST` | `true` | Compose a cited web answer before starting the local model |
+| `EXAM_ENGINE_TUTOR_WEB_SEARCH` | `auto` | `auto`, `exa`, `wikipedia`, `duckduckgo` or `off` |
+| `EXAM_ENGINE_TUTOR_WEB_SOURCES` | `6` | Web sources attached to one answer (maximum 6) |
 | `EXAM_ENGINE_TUTOR_LOCAL_CONCEPTS` | `12` | Stored concept records given to the model |
 | `EXAM_ENGINE_TUTOR_LLM_API_KEY` / `OPENAI_API_KEY` | unset | Credential for an OpenAI-compatible tutor endpoint |
 | `EXA_API_KEY` | unset | Optional Exa semantic web search; Wikipedia needs no key |
@@ -648,7 +655,7 @@ remaining candidate/top-k settings.
 ## Tests and checks
 
 ```bash
-python -m pytest                                     # 743 tests
+python -m pytest                                     # 749 tests
 python -m pytest --cov=exam_engine --cov-report=term-missing
 python -m ruff check src tests tools
 python -m ruff format --check src tests tools
@@ -842,6 +849,11 @@ heuristics are deliberately conservative rather than benchmark-optimal.
 * Exam DNA unit evidence is restricted to matches for the selected syllabus
   version. A paper mapped only to a different version is reported
   (`exam_dna_mixed_syllabus_versions`) rather than merged into the profile.
+* Exam DNA and dashboard unit charts fill questions without a confident Phase 3
+  match from Phase 7's deterministic best-fit review assignments. Those
+  assignments keep the full corpus visible but are not confident syllabus
+  matches; strict Phase 3 mapping counts (for example 29% for NEET Biology in the
+  current dataset) remain the authoritative mapping-quality measure.
 * Exam DNA session series and descriptive changes use only papers with an explicit
   session or examination date. A change needs at least three dated sessions and is
   a description of the observed papers, never a projection or probability.
@@ -946,15 +958,16 @@ heuristics are deliberately conservative rather than benchmark-optimal.
 * Dashboard jobs are in-process and ephemeral: a restart clears job history, not
   the data the job wrote. There is no durable queue, cancellation or progress
   percentage. Long analyses still take as long as the underlying service.
-* The tutor prefers a local Ollama model and can use an explicitly configured
-  OpenAI-compatible endpoint. Practice generation stays on the fast grounded
-  template by default; an OpenAI-compatible generation provider remains opt-in
-  through the Phase 10 settings. Model answers can take up to the configured timeout
-  (240 seconds by default), depend on the machine's model quality, and may use
-  general subject knowledge when stored and web sources are thin. With no model
-  available it falls back to extractive stored-record summaries; ambiguous
-  questions return concept suggestions instead of a guess. Concept quality still
-  inherits Phase 2/3/5 identity and mapping quality.
+* The tutor composes a cited web answer first, so ordinary questions normally
+  return in a few seconds without waiting for the local model. The optional local
+  Ollama or OpenAI-compatible model remains a fallback with a 10-second maximum
+  timeout. Practice generation stays on the fast grounded template by default; an
+  OpenAI-compatible generation provider remains opt-in through the Phase 10
+  settings. Model answers depend on the machine's model quality and may use general
+  subject knowledge when stored and web sources are thin. With no web or model
+  answer it falls back to extractive stored-record summaries; ambiguous questions
+  return concept suggestions instead of a guess. Concept quality still inherits
+  Phase 2/3/5 identity and mapping quality.
 * Practice answer checking is local and lexical. Multiple-choice answers are
   compared with the stored key; free text is scored by coverage of the stored
   reference and syllabus-topic terms. Regular and listed irregular plurals plus

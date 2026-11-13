@@ -224,6 +224,42 @@ export function truncationNotice(payload) {
   return h("p", { class: "truncation-note", text: `Summarised response — ${notes.join("; ")}.` });
 }
 
+/**
+ * Count one best-fit unit per question from the complete coverage review table.
+ * The table includes questions without a confident Phase 3 mapping, so unit
+ * charts can represent the whole corpus instead of only the confident subset.
+ */
+export function unitAssignmentSummary(report) {
+  const assignments = safeArray(report?.question_assignments);
+  const unitLabels = new Map(
+    safeArray(report?.units).map((unit) => [unit.unit_id, unit.unit_label]),
+  );
+  const counts = new Map();
+  const questionIds = new Set();
+  for (const assignment of assignments) {
+    const unitIds = safeArray(assignment.unit_ids);
+    if (!unitIds.length) continue;
+    questionIds.add(assignment.question_id);
+    unitIds.forEach((unitId, index) => {
+      const label =
+        safeArray(assignment.unit_labels)[index] || unitLabels.get(unitId) || unitId;
+      if (!counts.has(label)) counts.set(label, new Set());
+      counts.get(label).add(assignment.question_id);
+    });
+  }
+  const rows = [...counts]
+    .map(([label, ids]) => ({ label, value: ids.size }))
+    .sort((left, right) => right.value - left.value || left.label.localeCompare(right.label));
+  const total =
+    Number(report?.data_quality?.questions) || Number(report?.summary?.total_questions) || 0;
+  return {
+    assigned: questionIds.size,
+    total,
+    rate: total ? questionIds.size / total : 0,
+    rows,
+  };
+}
+
 export function tabs(ctx, items, active) {
   return h(
     "nav",

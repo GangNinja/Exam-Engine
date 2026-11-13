@@ -19,21 +19,37 @@ _QUOTE_TRANSLATION = str.maketrans({"’": "'", "‘": "'", "“": '"', "”": '
 _GENERIC_TERMS = frozenset(
     {
         "answer",
+        "clear",
         "concept",
+        "connect",
         "course",
+        "course-grounded",
         "define",
         "definition",
         "describe",
+        "example",
+        "examples",
         "explain",
         "following",
         "given",
+        "idea",
+        "ideas",
+        "introduction",
+        "key",
         "material",
+        "one",
+        "own",
         "question",
+        "relate",
+        "relates",
+        "sentence",
         "state",
+        "support",
         "topic",
         "unit",
         "using",
         "words",
+        "write",
     }
 )
 # Deliberately small and explicit: this is not a thesaurus or a semantic model.
@@ -62,15 +78,19 @@ _SYNONYM_GROUPS = (
     frozenset({"begin", "start"}),
     frozenset({"build", "construct"}),
     frozenset({"calculate", "compute"}),
+    frozenset({"cartographic", "cartographical", "cartography"}),
     frozenset({"choose", "select"}),
     frozenset({"decrease", "reduce"}),
     frozenset({"demonstrate", "show"}),
     frozenset({"graph", "plot"}),
     frozenset({"grow", "increase"}),
+    frozenset({"level", "leveling", "levelling"}),
     frozenset({"method", "technique"}),
     frozenset({"remove", "delete"}),
     frozenset({"result", "outcome"}),
     frozenset({"sum", "total"}),
+    frozenset({"topographic", "topographical", "topography"}),
+    frozenset({"triangulate", "triangulation"}),
     frozenset({"verify", "check"}),
 )
 _SYNONYM_VARIANTS: dict[str, frozenset[str]] = {
@@ -81,21 +101,26 @@ _STEP_PREFIX_RE = re.compile(
     re.IGNORECASE,
 )
 _GENERIC_STEP_PREFIXES = (
+    "connect the ideas",
     "connect these points",
+    "support the answer",
     "use the expected-answer outline",
     "use the stored outline",
 )
+_COVERED_RATIO = 0.70
+_PARTIAL_RATIO = 0.20
+_STRONG_COVERAGE_RATIO = 0.80
 MAX_ANSWER_CHARS = 4000
 MIN_ANSWER_TOKENS = 3
 MAX_OUTLINE_POINTS = 8
 LIMITATIONS = [
     "This is a local word/phrase coverage check, not a human or examination grade.",
-    "Regular and listed irregular plurals plus a small fixed list of common "
-    "synonyms are matched lexically; other paraphrases and equivalent "
+    "Regular/irregular plurals, conservative word stems, and a small fixed "
+    "list of synonyms are matched lexically; other paraphrases and equivalent "
     "mathematical wording can still be missed. Use the stored outline and "
     "source to judge meaning.",
-    "No mark is awarded or deducted; coverage counts describe only which stored "
-    "outline words appear in your answer.",
+    "No mark is awarded or deducted; coverage counts describe only which "
+    "substantive outline ideas appear in your answer.",
 ]
 
 
@@ -202,13 +227,19 @@ def _outline_points(question: GeneratedQuestion) -> list[tuple[str, str]]:
     points: list[tuple[str, str]] = []
     for raw in question.solution_steps:
         point = _clean_point(raw)
-        if point:
+        if point and _terms(point):
             points.append((point, "stored_solution_step"))
     if not points:
-        points.extend((point, "syllabus_facet") for point in _topic_points(question))
+        points.extend(
+            (point, "syllabus_facet")
+            for point in _topic_points(question)
+            if _terms(point)
+        )
     if not points:
         points.extend(
-            (point, "stored_reference") for point in _reference_points(question.answer_key or "")
+            (point, "stored_reference")
+            for point in _reference_points(question.answer_key or "")
+            if _terms(point)
         )
 
     unique: list[tuple[str, str]] = []
@@ -222,6 +253,28 @@ def _outline_points(question: GeneratedQuestion) -> list[tuple[str, str]]:
     return unique[:MAX_OUTLINE_POINTS]
 
 
+def _term_matches(term: str, answer_forms: set[str]) -> bool:
+    """Match a reference term to an answer term, allowing safe word variants.
+
+    Prefix matching catches common derivations such as survey/surveying,
+    measure/measurement and project/projection without treating unrelated
+    short words as equivalent.
+    """
+
+    forms = _word_forms(term)
+    if forms & answer_forms:
+        return True
+    for form in forms:
+        if len(form) < 5:
+            continue
+        for candidate in answer_forms:
+            if len(candidate) >= 5 and (
+                form.startswith(candidate) or candidate.startswith(form)
+            ):
+                return True
+    return False
+
+
 def _check_point(point: str, origin: str, answer_forms: set[str]) -> dict[str, Any] | None:
     terms = _terms(point)
     if not terms:
@@ -229,13 +282,14 @@ def _check_point(point: str, origin: str, answer_forms: set[str]) -> dict[str, A
     matched: list[str] = []
     missing: list[str] = []
     for term in terms:
-        if _word_forms(term) & answer_forms:
+        if _term_matches(term, answer_forms):
             matched.append(term)
         else:
             missing.append(term)
-    if len(matched) == len(terms):
+    ratio = len(matched) / len(terms)
+    if ratio >= _COVERED_RATIO:
         status = "covered"
-    elif matched:
+    elif ratio >= _PARTIAL_RATIO:
         status = "partial"
     else:
         status = "missing"
@@ -480,7 +534,12 @@ def grade_answer(
         )
 
     ideas = coverage["key_ideas"]
-    if ideas["covered"] == ideas["total"]:
+    strong = ideas["covered"] == ideas["total"] or (
+        coverage["ratio"] >= _STRONG_COVERAGE_RATIO
+        and ideas["missing"] == 0
+        and ideas["partial"] <= 1
+    )
+    if strong:
         verdict = "strong_match"
     elif ideas["covered"] or ideas["partial"]:
         verdict = "partial"

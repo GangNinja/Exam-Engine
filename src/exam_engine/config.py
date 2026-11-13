@@ -274,13 +274,17 @@ class CoverageSettings:
 
     A single question is observed evidence but not broad coverage; concepts below
     the configured minimum are reported as ``low_coverage`` rather than unmapped.
+    A confident single mapping can still be covered. The confidence defaults are
+    calibrated to the persisted Phase 3 lexical-score range, so a valid mapping
+    is not rejected merely because it is below an unrelated 0-1 confidence scale.
     The confidence floor is applied to already persisted Phase 3 candidates, so
     Phase 7 never invents a mapping the earlier phase did not propose.
     """
 
     max_questions: int = 20000
     covered_min_questions: int = 2
-    low_confidence_threshold: float = 0.5
+    low_confidence_threshold: float = 0.18
+    single_mapping_confidence_threshold: float = 0.19
     mapping_confidence_floor: float = 0.18
     small_corpus_questions: int = 5
     min_analysis_coverage: float = 0.8
@@ -292,7 +296,10 @@ class CoverageSettings:
         return cls(
             max_questions=_int_env(env, "EXAM_ENGINE_Q7_MAX_QUESTIONS", 20000),
             covered_min_questions=_int_env(env, "EXAM_ENGINE_Q7_COVERED_MIN_QUESTIONS", 2),
-            low_confidence_threshold=_float_env(env, "EXAM_ENGINE_Q7_LOW_CONFIDENCE", 0.5),
+            low_confidence_threshold=_float_env(env, "EXAM_ENGINE_Q7_LOW_CONFIDENCE", 0.18),
+            single_mapping_confidence_threshold=_float_env(
+                env, "EXAM_ENGINE_Q7_SINGLE_MAPPING_CONFIDENCE", 0.19
+            ),
             mapping_confidence_floor=_float_env(
                 env, "EXAM_ENGINE_Q7_MAPPING_CONFIDENCE_FLOOR", 0.18
             ),
@@ -508,15 +515,20 @@ class TutorSettings:
     The tutor prefers a local Ollama model, so the core AI path does not need a
     paid API key. An OpenAI-compatible endpoint can be selected explicitly; its
     credential is read from the environment and never stored in settings.
+
+    ``web_first`` composes an answer from cited web evidence before starting the
+    model, which keeps normal questions well below the latency of a local model.
+    The model remains a fallback and is bounded by ``timeout_seconds``.
     """
 
     provider: str = "auto"
     ollama_url: str = "http://127.0.0.1:11434"
     model: str | None = None
     llm_base_url: str | None = None
-    timeout_seconds: float = 240.0
+    timeout_seconds: float = 10.0
+    web_first: bool = True
     web_search: str = "auto"
-    max_web_sources: int = 2
+    max_web_sources: int = 6
     max_local_concepts: int = 12
 
     @classmethod
@@ -527,9 +539,10 @@ class TutorSettings:
             ollama_url=_str_env(env, "EXAM_ENGINE_TUTOR_OLLAMA_URL", "http://127.0.0.1:11434"),
             model=(env.get("EXAM_ENGINE_TUTOR_MODEL") or None),
             llm_base_url=(env.get("EXAM_ENGINE_TUTOR_LLM_BASE_URL") or None),
-            timeout_seconds=_positive_float_env(env, "EXAM_ENGINE_TUTOR_TIMEOUT", 240.0),
+            timeout_seconds=_positive_float_env(env, "EXAM_ENGINE_TUTOR_TIMEOUT", 10.0),
+            web_first=_bool_env(env, "EXAM_ENGINE_TUTOR_WEB_FIRST", True),
             web_search=_str_env(env, "EXAM_ENGINE_TUTOR_WEB_SEARCH", "auto"),
-            max_web_sources=_int_env(env, "EXAM_ENGINE_TUTOR_WEB_SOURCES", 2),
+            max_web_sources=_int_env(env, "EXAM_ENGINE_TUTOR_WEB_SOURCES", 6),
             max_local_concepts=_int_env(env, "EXAM_ENGINE_TUTOR_LOCAL_CONCEPTS", 12),
         )
 

@@ -24,6 +24,7 @@ import {
   selectedSyllabus,
   sourceSummary,
   statusBadge,
+  unitAssignmentSummary,
 } from "./shared.js";
 
 export function renderOverview(ctx) {
@@ -199,9 +200,18 @@ function renderNextSteps(ctx) {
 function renderSnapshots(ctx) {
   const coverageHost = h("div", {}, loadingPanel("Computing coverage snapshot", 3));
   const analyticsHost = h("div", {}, loadingPanel("Reading question distribution", 3));
+  let coverageReport = null;
+  let coverageSettled = false;
+  let analyticsReport = null;
+
+  const drawAnalytics = () => {
+    if (!analyticsReport || !coverageSettled) return;
+    analyticsHost.replaceChildren(renderAnalyticsSnapshot(analyticsReport, coverageReport));
+  };
 
   const syllabusId = selectedSyllabus(ctx);
   if (!syllabusId) {
+    coverageSettled = true;
     coverageHost.replaceChildren(
       emptyState({
         title: "Coverage needs a syllabus",
@@ -219,6 +229,7 @@ function renderSnapshots(ctx) {
     ctx.api
       .coverage(ctx.courseId, { syllabus_id: syllabusId, view: "summary", limit: 60 }, { signal: ctx.signal })
       .then((report) => {
+        coverageReport = report;
         coverageHost.replaceChildren(renderCoverageSnapshot(ctx, report));
       })
       .catch((error) => {
@@ -229,6 +240,10 @@ function renderSnapshots(ctx) {
             context: "The rest of the overview is still usable. Coverage depends on question mappings and one syllabus version.",
           }),
         );
+      })
+      .finally(() => {
+        coverageSettled = true;
+        drawAnalytics();
       });
   }
 
@@ -244,7 +259,10 @@ function renderSnapshots(ctx) {
   } else {
     ctx.api
       .analytics(ctx.courseId, { view: "summary" }, { signal: ctx.signal })
-      .then((report) => analyticsHost.replaceChildren(renderAnalyticsSnapshot(report)))
+      .then((report) => {
+        analyticsReport = report;
+        drawAnalytics();
+      })
       .catch((error) => {
         if (isAbort(error)) return;
         analyticsHost.replaceChildren(
@@ -294,6 +312,7 @@ function renderSnapshots(ctx) {
 
 export function renderCoverageSnapshot(ctx, report) {
   const summary = report.summary;
+  const assignment = unitAssignmentSummary(report);
   const statuses = [
     { label: coverageLabel("covered"), value: summary.covered_concepts, tone: "positive" },
     { label: coverageLabel("low_coverage"), value: summary.low_coverage_concepts, tone: "caution" },
@@ -313,9 +332,13 @@ export function renderCoverageSnapshot(ctx, report) {
     { class: "snapshot" },
     metrics([
       { label: "Concept coverage", value: formatPercent(summary.concept_coverage_rate, 0) },
-      { label: "Mapped questions", value: formatPercent(summary.mapped_question_rate, 0) },
+      { label: "Unit assignment", value: formatPercent(assignment.rate, 0) },
       { label: "Analysed", value: formatPercent(summary.analysis_coverage_rate, 0) },
     ]),
+    h(
+      "p",
+      { class: "muted", text: `Strict Phase 3 unit matches cover ${formatPercent(summary.mapped_question_rate, 0)}; best-fit review assignments keep every question visible.` },
+    ),
     stackedBar(statuses, { title: "Coverage status across syllabus concepts", description: `${summary.total_concepts} concepts in the selected syllabus.` }),
     attention.length
       ? h(
@@ -340,13 +363,19 @@ export function renderCoverageSnapshot(ctx, report) {
   );
 }
 
-export function renderAnalyticsSnapshot(report) {
-  const units = safeArray(report.mapping?.units)
-    .slice(0, 8)
-    .map((unit) => ({ label: unit.unit_label, value: unit.question_count }));
+export function renderAnalyticsSnapshot(report, coverageReport = null) {
+  const assignment = unitAssignmentSummary(coverageReport);
+  const units = assignment.rows.length
+    ? assignment.rows
+    : safeArray(report.mapping?.units)
+        .slice(0, 8)
+        .map((unit) => ({ label: unit.unit_label, value: unit.question_count }));
   const types = safeArray(report.question_types?.primary_labels)
     .slice(0, 6)
     .map((row) => ({ label: humaniseCode(row.label), value: row.question_count }));
+  const unitCoverage = coverageReport
+    ? assignment.rate
+    : report.data_quality?.mapping_coverage;
   return h(
     "div",
     { class: "snapshot" },
@@ -355,12 +384,15 @@ export function renderAnalyticsSnapshot(report) {
         label: "Analysis coverage",
         value: formatPercent(report.data_quality?.analysis_coverage, 0),
       },
-      { label: "Mapping coverage", value: formatPercent(report.data_quality?.mapping_coverage, 0) },
+      { label: "Unit assignment", value: formatPercent(unitCoverage, 0) },
       { label: "Known sessions", value: formatInteger(report.data_quality?.known_sessions) },
     ]),
     units.length
-      ? barChart(units, { title: "Questions per syllabus unit", description: "Counts include each ambiguous assignment; totals are shown in Analysis." })
-      : h("p", { class: "muted", text: "No unit mappings are available for the chart." }),
+      ? barChart(units, {
+          title: "Questions per syllabus unit",
+          description: "Every analysed question is represented; a question can appear in more than one unit.",
+        })
+      : h("p", { class: "muted", text: "No unit assignments are available for the chart." }),
     types.length
       ? barChart(types, { title: "Primary question types", description: "Wording-based estimates, not trained classifications." })
       : null,

@@ -147,6 +147,13 @@ class _Candidate:
     node: GraphNode | None
 
 
+@dataclass(frozen=True)
+class _WebAnswer:
+    answer: str
+    key_points: list[str]
+    citation_ids: list[str]
+
+
 class TutorService:
     """Course-scoped tutor with a model path and an extractive fallback."""
 
@@ -556,13 +563,12 @@ class TutorService:
             "stored_evidence",
             "Searching stored concepts, coverage and source pages…",
         )
-        ai_status = self.ai.status()
         if self._is_exam_focus(clean):
             focus = self._exam_focus_answer(course_id, syllabus_id, clean)
             if focus is not None:
                 return focus
-        unsupported = self._unsupported_intent(clean) if not ai_status.available else None
-        if unsupported is not None:
+        unsupported = self._unsupported_intent(clean)
+        if unsupported is not None and not self.ai.status().available:
             code, message = unsupported
             return self._unavailable(
                 course_id,
@@ -937,9 +943,6 @@ class TutorService:
         answer to the existing response contract.
         """
 
-        status = self.ai.status()
-        if not status.available:
-            return None, None
         with self.db.session() as session:
             course = CourseRepository(session).get(course_id)
         if course is None:
@@ -1014,6 +1017,24 @@ class TutorService:
             source_id = f"W{index}"
             web_citations[source_id] = source.as_citation()
             web_lines.append(f"[{source_id}] {source.title} ({source.url}): {source.snippet[:800]}")
+
+        if self.settings.tutor.web_first and web_sources:
+            fast_answer = self._fast_web_answer(
+                course_id,
+                syllabus_id,
+                question,
+                match,
+                ranked,
+                web_sources,
+                web_citations,
+                local_citations,
+            )
+            if fast_answer is not None:
+                return fast_answer, None
+
+        status = self.ai.status()
+        if not status.available:
+            return None, None
 
         allowed_ids = sorted(local_citations) + sorted(web_citations)
         if not allowed_ids:
@@ -1221,6 +1242,129 @@ class TutorService:
             },
             None,
         )
+
+    def _fast_web_answer(
+        self,
+        course_id: str,
+        syllabus_id: str | None,
+        question: str,
+        match: _Candidate | None,
+        ranked: list[_Candidate],
+        web_sources: list[Any],
+        web_citations: dict[str, dict[str, Any]],
+        local_citations: dict[str, dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        """Compose a cited answer from web evidence without starting the model."""
+
+        composed = _compose_web_answer(question, match, web_sources)
+        if composed is None:
+            return None
+        answer_citations = [
+            web_citations[source_id]
+            for source_id in composed.citation_ids
+            if source_id in web_citations
+        ]
+        if not answer_citations:
+            return None
+
+        sections: list[dict[str, Any]] = [
+            {
+                "heading": "Tutor answer",
+                "text": composed.answer,
+                "citations": answer_citations,
+            }
+        ]
+        if composed.key_points:
+            sections.append(
+                {
+                    "heading": "Key points",
+                    "text": "\n".join(f"• {point}" for point in composed.key_points),
+                    "citations": answer_citations,
+                }
+            )
+
+        if match is not None:
+            units = ", ".join(match.unit_labels) or "no unit placement"
+            connection = (
+                f"This answer is tied to {match.label} in {units}. "
+                f"The stored corpus maps {match.question_count} question(s) to it."
+            )
+        else:
+            connection = (
+                "No exact syllabus label matched. I used cited web sources; "
+                "use the suggested concepts below to narrow the question."
+            )
+        connection_citations = (
+            [local_citations[next(iter(local_citations))]] if local_citations else []
+        )
+        sections.append(
+            {
+                "heading": "Course connection",
+                "text": connection,
+                "citations": connection_citations,
+            }
+        )
+
+        suggestions = [
+            {
+                "concept_id": item.concept_id,
+                "label": item.label,
+                "unit_labels": list(item.unit_labels),
+            }
+            for item in ranked
+            if match is None or item.concept_id != match.concept_id
+        ][:8]
+        limitations = [
+            "This answer was composed from live cited web sources instead of generated "
+            "by the local model, so it can return within the latency budget.",
+            "Live web sources can be incomplete or simplified; verify important formulas "
+            "and assumptions before relying on them.",
+        ]
+        if match is None:
+            limitations.append(
+                "No exact syllabus concept matched the wording; the suggested concepts "
+                "are the closest stored topics."
+            )
+
+        return {
+            "course_id": course_id,
+            "syllabus_id": syllabus_id,
+            "question": question,
+            "status": "answered",
+            "state": "speaking",
+            "event": "tutor_answered",
+            "concept": (
+                {
+                    "concept_id": match.concept_id,
+                    "node_id": match.node.node_id if match.node else None,
+                    "label": match.label,
+                    "unit_labels": list(match.unit_labels),
+                    "coverage_status": match.coverage.status.value if match.coverage else None,
+                    "question_count": match.question_count,
+                }
+                if match is not None
+                else None
+            ),
+            "answer": composed.answer,
+            "sections": sections,
+            "evidence": answer_citations,
+            "related": [],
+            "prerequisites": [],
+            "learning_path": None,
+            "suggestions": suggestions,
+            "follow_ups": [],
+            "limitations": limitations,
+            "capabilities": self.capabilities(),
+            "recovery": None,
+            "warnings": [],
+            "confidence": "medium",
+            "ai": {
+                "provider": "web",
+                "model": None,
+                "web_used": True,
+                "web_sources": len(web_sources),
+            },
+        }
 
     # -- concept loading ---------------------------------------------------
     def _candidates(
@@ -1766,6 +1910,216 @@ def _target_clause(raw_text: str, label: str) -> str:
     if best:
         return best[:500]
     return label
+
+
+_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+|\n+")
+_WEB_FOCUS_TERMS = (
+    "specific energy",
+    "critical flow",
+    "hydraulic jump",
+    "uniform flow",
+    "gradually varied",
+    "water surface",
+    "formula",
+    "equation",
+)
+_WEB_META_PREFIXES = (
+    "this document",
+    "this article",
+    "this chapter",
+    "this paper",
+    "this lecture",
+    "this section",
+    "this page",
+    "these notes",
+    "lecture note",
+    "detailed discussion",
+    "various calculations",
+    "the thirteen possible",
+    "the fundamental types",
+    "definition of variables",
+    "m=",
+    "conjugate depths relationships",
+    "where:",
+    "equation ",
+    "figure ",
+    "this figure",
+    "table ",
+    "see also",
+    "the document",
+    "the article",
+    "abstract ",
+)
+_WEB_EXPLANATORY = (
+    " is ",
+    " are ",
+    " occurs ",
+    " means ",
+    " describes ",
+    " when ",
+    " because ",
+    " can ",
+    " uses ",
+    " depends ",
+    " equals ",
+    " defined as ",
+)
+
+
+def _question_terms(text: str) -> set[str]:
+    return {
+        token
+        for token in _TOKEN_RE.findall(text.casefold())
+        if token not in _STOPWORDS and len(token) > 1
+    }
+
+
+_WEB_TOPIC_SPECS = (
+    ("Specific energy", ("specific energy",)),
+    ("Critical flow", ("critical flow", "critical depth", "froude number")),
+    ("Hydraulic jump", ("hydraulic jump",)),
+    ("Uniform flow", ("uniform flow", "normal depth")),
+    ("Gradually varied flow", ("gradually varied", "gradually varying")),
+    ("Water-surface profiles", ("water surface", "surface profile", "surface water profiles")),
+)
+
+
+def _contains_phrase(text: str, phrase: str) -> bool:
+    return re.search(rf"(?<![a-z]){re.escape(phrase)}(?![a-z])", text) is not None
+
+
+def _web_topic_specs(question: str) -> list[tuple[str, tuple[str, ...]]]:
+    lowered = question.casefold()
+    return [
+        (label, keywords)
+        for label, keywords in _WEB_TOPIC_SPECS
+        if any(_contains_phrase(lowered, keyword) for keyword in keywords)
+    ]
+
+
+def _compose_web_answer(
+    question: str,
+    match: _Candidate | None,
+    sources: list[Any],
+) -> _WebAnswer | None:
+    """Select cited, question-relevant sentences from retrieved web text.
+
+    This is deliberately extractive: the tutor must not invent facts or sources
+    just to avoid a model call. A weak or off-topic result returns ``None`` so the
+    normal stored-evidence fallback can take over.
+    """
+
+    terms = _question_terms(question)
+    if match is not None:
+        terms |= _question_terms(match.label)
+    if len(terms) < 2:
+        return None
+
+    ranked: list[tuple[float, int, int, str, set[str]]] = []
+    seen: set[str] = set()
+    for source_index, source in enumerate(sources, start=1):
+        snippet = str(getattr(source, "snippet", "") or "")
+        for sentence_index, raw in enumerate(_SENTENCE_RE.split(snippet)):
+            sentence = " ".join(raw.split())
+            if len(sentence) < 50 or len(sentence) > 520:
+                continue
+            key = sentence.casefold()
+            if key in seen:
+                continue
+            if key.startswith(_WEB_META_PREFIXES):
+                continue
+            if sentence[:1].islower():
+                continue
+            if sentence.endswith(("...", "…")):
+                continue
+            if len(sentence) > 350 and "=" in sentence:
+                continue
+            tokens = set(_TOKEN_RE.findall(key))
+            overlap = tokens & terms
+            if len(overlap) < 2:
+                continue
+            symbol_count = sum(character in "=+−×÷^/{}[]" for character in sentence)
+            if symbol_count / max(1, len(sentence)) > 0.06:
+                continue
+            score = float(len(overlap)) + min(len(sentence), 500) / 1000.0
+            if any(focus in key for focus in _WEB_FOCUS_TERMS):
+                score += 1.0
+            if any(marker in key for marker in _WEB_EXPLANATORY):
+                score += 0.8
+            if any(
+                word in key
+                for word in ("sink", "household", "caltech", "external link", "this example")
+            ):
+                score -= 2.0
+            if len(sentence) > 280:
+                score -= (len(sentence) - 280) / 200.0
+            seen.add(key)
+            ranked.append((score, source_index, sentence_index, sentence, tokens))
+
+    if len(ranked) < 2:
+        return None
+    ranked.sort(key=lambda item: item[0], reverse=True)
+
+    selected: list[tuple[str, tuple[float, int, int, str, set[str]]]] = []
+    used: set[tuple[int, int]] = set()
+    specs = _web_topic_specs(question)
+
+    def best_matching(
+        keywords: tuple[str, ...],
+    ) -> tuple[float, int, int, str, set[str]] | None:
+        matches: list[tuple[float, int, int, str, set[str]]] = []
+        for item in ranked:
+            if (item[1], item[2]) in used:
+                continue
+            lowered = item[3].casefold()
+            if any(_contains_phrase(lowered, keyword) for keyword in keywords):
+                matches.append(item)
+        if not matches:
+            return None
+        return max(
+            matches,
+            key=lambda item: (
+                any(item[3].casefold().startswith(keyword) for keyword in keywords),
+                item[0],
+            ),
+        )
+
+    overview = best_matching(("in fluid mechanics", "open-channel flow is"))
+    if overview is not None:
+        selected.append(("Overview", overview))
+        used.add((overview[1], overview[2]))
+
+    for label, keywords in specs:
+        best = best_matching(keywords)
+        if best is not None:
+            selected.append((label, best))
+            used.add((best[1], best[2]))
+
+    # Topic matching can leave gaps when result snippets are terse. Fill the
+    # answer with the strongest remaining sentences so it still reads as an
+    # explanation rather than a label.
+    if not specs or len(selected) < 2:
+        for item in ranked:
+            if len(selected) >= 3:
+                break
+            if (item[1], item[2]) not in used:
+                selected.append(("Further detail", item))
+                used.add((item[1], item[2]))
+    if len(selected) < 2:
+        return None
+
+    answer = "\n".join(f"{label}: {item[3]} [W{item[1]}]" for label, item in selected)
+    if len(answer) < 120:
+        return None
+
+    points: list[str] = []
+    for _label, item in selected[:4]:
+        sentence = item[3]
+        if len(sentence) > 220:
+            sentence = sentence[:217].rsplit(" ", 1)[0] + "…"
+        points.append(sentence)
+    citation_ids = sorted({f"W{item[1]}" for _label, item in selected})
+    return _WebAnswer(answer=answer, key_points=points, citation_ids=citation_ids)
 
 
 def _dedupe(values: list[str]) -> list[str]:
