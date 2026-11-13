@@ -87,6 +87,7 @@ from exam_engine.storage.repositories import (
     QuestionRepository,
 )
 from exam_engine.storage.schema import ExamPaperRow, ExamQuestionDetailRow
+from exam_engine.understanding.classification import difficulty_band
 
 logger = logging.getLogger(__name__)
 
@@ -161,7 +162,14 @@ class _PaperQuestion:
 
     @property
     def difficulty(self) -> DifficultyLabel | None:
-        return self.analysis.difficulty_label if self.analysis else None
+        analysis = self.analysis
+        if analysis is None:
+            return None
+        if analysis.difficulty_label is not DifficultyLabel.UNKNOWN:
+            return analysis.difficulty_label
+        if analysis.word_count <= 0:
+            return DifficultyLabel.UNKNOWN
+        return difficulty_band(analysis.difficulty_score)
 
     @property
     def low_confidence(self) -> bool:

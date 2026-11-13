@@ -1,4 +1,4 @@
-# Intelligent Exam Knowledge & Assessment Engine — Phases 1–13
+# Intelligent Exam Knowledge & Assessment Engine — Phases 1–14.2
 
 Multi-course ingestion, NLP analysis, question understanding, question-paper
 analytics, a persistent question knowledge graph, prerequisite discovery with
@@ -8,6 +8,30 @@ tracker, grounded, review-first automatic question generation, advanced
 assessment intelligence — question mutation, adversarial questions and
 evidence-bounded misconception mining — and first-class integration of personal
 GATE, CBSE, JEE and NEET examination datasets for the exam-knowledge platform.
+
+Phase 14 adds an evidence-first dataset intelligence and recovery layer. It audits
+all 29 courses for structure, options, answers, provenance, OCR/maths damage,
+metadata and duplication; proposes repairs in a separate versioned projection;
+recovers answers only from local, public or explicitly AI-assisted evidence; and
+keeps every unresolved or unverified record out of release. Raw CSV/PDF files are
+never modified.
+
+Phase 14.1 enhances that layer with reusable source-discovery adapters, document-type
+classification, official answer-key parsing and question matching, a verification
+engine that is separate from answer generation, calibrated quality indicators and
+explicit passage groups. It adds `inventory`, `analyze`, `recover`, `verify`,
+`reconstruct` and `full` workflows with dry-run, resume and targeted-course support,
+and exposes source, verification and passage evidence in the dashboard.
+
+Phase 14.2 adds bounded retrieval from configured public official archives for GATE,
+CBSE, JEE Advanced, JEE Main and NEET; HTML/PDF/ZIP extraction; identity-aware paper
+matching; official key parsing; optional Crawl4AI conversion; and a persistent
+retrieval cache. The latest all-course continuation run,
+`recovery-20261109T020000Z-full6`, processed 15,432 records, recovered 1,271 answers,
+officially verified 1,229 GATE answers and released 1,180 records. GATE 2024–2026 is
+official for nine courses; CBSE, JEE Advanced, JEE Main and NEET still have
+documented source-coverage blockers, so the corpus is not fully source-verified and
+no course is release-ready.
 
 Phase 1 turns messy course material — question papers, syllabi, notes and question
 banks — into validated, provenance-tracked, course-scoped records. Phase 2 derives
@@ -55,10 +79,12 @@ discarding answers it cannot read instead of calling them misconceptions.
 Phase 12 adds the application layer: a loopback-only dashboard that reads and
 writes through the Phase 1–11 services, a framework-free browser workspace with
 real SVG charts, vendored MIT Hairline illustrations, an original animated tutor
-that explains only stored course evidence, bounded background jobs for the
-long-running analyses, batch expansion across distinct concepts, local answer
-checks for stored practice questions, and explicit unavailable states for
-capabilities that do not exist (conversational reasoning and forecasting).
+that combines stored course evidence with cited web sources and a local Ollama
+model (falling back to an extractive summary when no model is available), bounded
+background jobs for the long-running analyses, batch expansion across distinct
+concepts, local answer checks for stored practice questions, and explicit
+boundaries for capabilities that are not implemented (forecasting and autonomous
+approval).
 
 Phase 13 adds first-class personal examination datasets. It discovers the real
 GATE, CBSE Class 10/12, JEE Advanced, JEE Mains and NEET corpus without changing
@@ -70,7 +96,12 @@ into course-isolated paper, question, answer and syllabus records. The dashboard
 filters, quality signals and import history. Missing answers, options, marks or
 years remain explicitly missing; nothing is fabricated or merged across exams.
 
-**Status:** Phases 1–13 complete for the documented software and corpus checks.
+**Status:** Phases 1–14.2 implemented. The latest all-course continuation run,
+`recovery-20261109T020000Z-full6`, recovered 1,271 answers, including 1,229
+officially verified GATE answers, and released 1,180 records. GATE 2024–2026 coverage
+is official for nine courses; CBSE, JEE Advanced, JEE Main and NEET still have
+documented blockers, so the corpus is not fully source-verified and no course is
+release-ready.
 Practice answer checks are local lexical/rubric feedback, not an examination
 grade; forecasting and autonomous approval are not implemented, and no generated
 item or mined pattern is ever approved automatically. The dashboard is a local
@@ -80,7 +111,7 @@ the corpus inventory, audit results, downstream totals and verification record.
 
 ---
 
-## What Phases 1–13 deliver
+## What Phases 1–14.2 deliver
 
 | Capability | Where |
 |---|---|
@@ -139,14 +170,31 @@ the corpus inventory, audit results, downstream totals and verification record.
 | Advanced mutate/adversarial/variants/show/review, responses and misconceptions CLI | [`cli_advanced.py`](src/exam_engine/cli_advanced.py) |
 | Loopback dashboard server, stable JSON API, background jobs and static asset host | [`dashboard/`](src/exam_engine/dashboard), [`cli_dashboard.py`](src/exam_engine/cli_dashboard.py) |
 | Framework-free workspace: overview, course, analysis, learning, practice, tutor, including Phase 11 mutation and adversarial generation | [`dashboard/static/`](src/exam_engine/dashboard/static) |
-| Course-scoped extractive tutor with citations and explicit capability boundaries | [`tutor.py`](src/exam_engine/dashboard/tutor.py) |
+| Course-scoped AI tutor with local Ollama/OpenAI-compatible answers, cited web sources and an extractive fallback | [`tutor.py`](src/exam_engine/dashboard/tutor.py), [`tutor_ai.py`](src/exam_engine/dashboard/tutor_ai.py), [`websearch.py`](src/exam_engine/dashboard/websearch.py) |
 | Original animated SVG tutor avatar (six states, text captions, reduced motion) | [`tutor-avatar.js`](src/exam_engine/dashboard/static/tutor-avatar.js) |
 | Vendored Hairline 0.5.1 (MIT, exact pin, provenance and lazy loading) | [`vendor/hairline/`](src/exam_engine/dashboard/static/vendor/hairline) |
-| Dataset discovery, syllabus matching, duplicate-safe audit and inventory reports | [`src/exam_engine/datasets/`](src/exam_engine/datasets), [`reports/phase13/`](reports/phase13) |
+| Dataset discovery, syllabus matching, duplicate-safe audit and inventory reports | [`src/exam_engine/datasets/`](src/exam_engine/datasets), [`datasets/README.md`](datasets/README.md) |
 | Schema-preserving CSV/PDF import and course-isolated exam projections | [`catalog.py`](src/exam_engine/datasets/catalog.py), [`parsing.py`](src/exam_engine/datasets/parsing.py), [`service.py`](src/exam_engine/datasets/service.py) |
 | Phase 13 paper/question/answer/detail tables and import-run audit trail | [`0010_exam_datasets.sql`](src/exam_engine/storage/migrations/0010_exam_datasets.sql), [`exam_repository.py`](src/exam_engine/storage/exam_repository.py) |
 | Real-data exam read models, filters, quality counts and dashboard API | [`queries.py`](src/exam_engine/datasets/queries.py), [`api.py`](src/exam_engine/dashboard/api.py), [`exams.js`](src/exam_engine/dashboard/static/views/exams.js) |
 | Phase 13 discover/audit/import/status/papers/questions/syllabus CLI | [`cli_exams.py`](src/exam_engine/cli_exams.py) |
+| Phase 14 corpus/schema inventory with source-document association and confidence | [`src/exam_engine/recovery/`](src/exam_engine/recovery), [`service.py`](src/exam_engine/recovery/service.py) |
+| Extensible issue detection: structure, options, answers, OCR/maths, metadata, duplication | [`structure.py`](src/exam_engine/recovery/structure.py), [`authenticity.py`](src/exam_engine/recovery/authenticity.py), [`quality.py`](src/exam_engine/recovery/quality.py) |
+| Answer recovery with provenance and verification states (local → public → AI-assisted) | [`answers.py`](src/exam_engine/recovery/answers.py) |
+| Transparent 11-component quality scores, release policy and rollback | [`quality.py`](src/exam_engine/recovery/quality.py), [`models/recovery.py`](src/exam_engine/models/recovery.py) |
+| Additive recovery schema, audit tables and review/rollback repository | [`0012_dataset_recovery.sql`](src/exam_engine/storage/migrations/0012_dataset_recovery.sql), [`recovery_repository.py`](src/exam_engine/storage/recovery_repository.py) |
+| Phase 14 inventory/analyze/file/status/courses/issues/show/review/rollback/export CLI | [`cli_recovery.py`](src/exam_engine/cli_recovery.py) |
+| Phase 14.1 source discovery, document classification and official answer-key parsing/matching | [`sources.py`](src/exam_engine/recovery/sources.py) |
+| Verification engine separate from generation (MCQ, numeric, independent evidence) | [`verification.py`](src/exam_engine/recovery/verification.py) |
+| Explicit passage groups built only from inline children or a shared passage column | [`structure.py`](src/exam_engine/recovery/structure.py), [`service.py`](src/exam_engine/recovery/service.py) |
+| Coverage-gated quality calibration and separate structural/answer/source/readiness indicators | [`quality.py`](src/exam_engine/recovery/quality.py) |
+| Phase 14.1 inventory/analyze/recover/verify/reconstruct/full workflows with dry-run, resume and course targeting | [`cli_recovery.py`](src/exam_engine/cli_recovery.py) |
+| Additive source, verification and passage tables | [`0013_recovery_intelligence.sql`](src/exam_engine/storage/migrations/0013_recovery_intelligence.sql) |
+| Dataset quality workspace with source discovery, verification and passage evidence | [`recovery.js`](src/exam_engine/dashboard/static/views/recovery.js), [`api.py`](src/exam_engine/dashboard/api.py) |
+| Official GATE/CBSE/JEE/NEET archive adapters with bounded source candidates | [`archives.py`](src/exam_engine/recovery/archives.py), [`archive_sources.json`](src/exam_engine/recovery/archive_sources.json) |
+| HTML/PDF/ZIP retrieval, optional Crawl4AI conversion and persistent cache reuse | [`retrieval.py`](src/exam_engine/recovery/retrieval.py), [`crawl4ai_adapter.py`](src/exam_engine/recovery/crawl4ai_adapter.py), [`0014_recovery_source_retrieval.sql`](src/exam_engine/storage/migrations/0014_recovery_source_retrieval.sql), [`0015_recovery_crawl4ai_cache.sql`](src/exam_engine/storage/migrations/0015_recovery_crawl4ai_cache.sql) |
+| Identity-aware paper extraction, official-key parsing and independent recomputation | [`papers.py`](src/exam_engine/recovery/papers.py), [`sources.py`](src/exam_engine/recovery/sources.py), [`solver.py`](src/exam_engine/recovery/solver.py) |
+| Provenance, passage and subpart projections for recovered records | [`0016_exam_provenance.sql`](src/exam_engine/storage/migrations/0016_exam_provenance.sql), [`0019_exam_passages.sql`](src/exam_engine/storage/migrations/0019_exam_passages.sql), [`0020_exam_question_subparts.sql`](src/exam_engine/storage/migrations/0020_exam_question_subparts.sql) |
 
 ## Quickstart
 
@@ -213,6 +261,20 @@ python -m exam_engine exams import                    # imports CSVs and syllabu
 python -m exam_engine exams status
 python -m exam_engine exams papers --course gate-chemistry
 python -m exam_engine exams questions --course gate-chemistry --limit 5
+python -m exam_engine recovery inventory             # Phase 14.1: schemas and sources
+python -m exam_engine recovery analyze --dry-run    # full audit, no database writes
+python -m exam_engine recovery analyze --workflow full --fetch-sources \
+    --crawl-engine http --source-limit 29 --retrieval-limit 6 \
+    --retrieval-follow-links --retry-failed \
+    --report-dir reports/recovery/phase142-final
+python -m exam_engine recovery analyze --workflow verify --course gate-chemistry
+python -m exam_engine recovery analyze --workflow reconstruct --resume
+python -m exam_engine recovery status
+python -m exam_engine recovery courses
+python -m exam_engine recovery issues --severity error --limit 20
+python -m exam_engine recovery show RECORD_ID
+python -m exam_engine recovery review REPAIR_ID --approve
+python -m exam_engine recovery export --course gate-mathematics --output reports/recovery/released.json
 ```
 
 The separate multi-session analytics fixture demonstrates period trends without
@@ -246,7 +308,9 @@ The dashboard is a local, single-user workspace over the same database and
 service layer as the CLI. It has no accounts, no TLS and no telemetry; it binds
 to loopback only unless `--allow-remote` is passed deliberately. Ingest and
 analyse courses with the CLI (or the Course workspace), then open Overview,
-Analysis, Learning, Practice and Tutor. Practice exposes Phase 10 generation and
+Analysis, Learning, Practice and Tutor. Dataset management covers the Phase 13 corpus; Dataset
+quality shows the Phase 14.1–14.2 recovery runs, discovered sources, answer verification,
+passage groups, course scores, record comparison and review/rollback controls. Practice exposes Phase 10 generation and
 Phase 11 mutation/adversarial generation against the real stored corpus; every
 item enters the same human review queue as a Draft. Multi-question requests can
 continue across other in-scope concepts, and stored cards offer a local "Check
@@ -359,7 +423,7 @@ src/exam_engine/
     similarity.py        candidate retrieval and four similarity kinds
     service.py           per-course orchestration and run reports
   storage/
-    migrations/*.sql     checksum-verified schema (0003 = Phase 2, 0004 = Phase 3, 0005–0006 = Phase 5, 0007 = Phase 10, 0008–0009 = Phase 11, 0010 = Phase 13)
+    migrations/*.sql     checksum-verified schema (0003 = Phase 2, 0004 = Phase 3, 0005–0006 = Phase 5, 0007 = Phase 10, 0008–0009 = Phase 11, 0010 = Phase 13, 0011 = NLP status repair, 0012 = Phase 14, 0013 = Phase 14.1, 0014 = Phase 14.2 retrieval cache, 0015 = Crawl4AI cache, 0016 = provenance, 0017–0018 = answer-AI rollback, 0019 = passages, 0020 = subparts)
     schema.py            ORM rows mirroring the migrations
     repositories.py      the only SQL surface (ingest)
     nlp_repositories.py  the only SQL surface (derived NLP data)
@@ -410,18 +474,34 @@ src/exam_engine/
     service.py          scope, assembly, dedupe, persistence, mining and review
   cli_advanced.py        advanced capabilities/mutate/adversarial/variants/show/review,
                          advanced responses …, advanced misconceptions …
+  recovery/
+    schema.py           schema detection, column aliases and row normalisation
+    structure.py        question boundaries, passage/subpart evidence, option reconstruction, maths checks
+    authenticity.py     source-fidelity and unsupported-content evidence
+    archives.py         configured official-archive discovery for GATE/CBSE/JEE/NEET
+    retrieval.py        bounded HTML/PDF/ZIP retrieval and persistent cache reuse
+    crawl4ai_adapter.py optional rendered-HTML conversion
+    papers.py           paper extraction and identity-aware question matching
+    sources.py          official key parsing and source classification
+    solver.py           independent recomputation path (no automatic promotion)
+    answers.py          local -> public -> model answer recovery with provenance
+    quality.py          issue aggregation, 11-component scores and release policy
+    service.py          discovery, batching, persistence, reports and review hooks
+  cli_recovery.py        recovery inventory/analyze/file/status/courses/issues/show/review/rollback/export
   dashboard/
     api.py              HTTP adapter over the existing services (no re-implemented analysis)
     errors.py           domain error -> stable JSON envelope
     jobs.py             bounded in-process jobs with per-course de-duplication
     server.py           loopback HTTP server, static assets, CSP and same-origin checks
-    tutor.py            course-scoped extractive tutor and capability report
+    tutor.py            course-scoped AI tutor, grounded fallback and capability report
+    tutor_ai.py         Ollama/OpenAI-compatible model adapter with structured JSON output
+    websearch.py        optional Exa and keyless Wikipedia retrieval with citations
     static/             framework-free HTML/CSS/ES modules (no runtime build step)
   cli_dashboard.py      dashboard command with a loopback guard
 tools/build_sample_dataset.py   regenerates the synthetic sample dataset
 datasets/sample/                committed synthetic sample + manifest
 datasets/analytics_sample/      synthetic three-session fixture for Phase 4/tests
-tests/                          620 tests across models, adapters, segmentation, storage, pipeline, NLP, understanding, analytics, graph, prerequisites, coverage, Exam DNA, concept evolution, question generation, advanced assessment, CLI, artefacts and the dashboard API
+tests/                          743 tests across models, adapters, segmentation, storage, pipeline, NLP, understanding, analytics, graph, prerequisites, coverage, Exam DNA, concept evolution, question generation, advanced assessment, recovery, CLI, artefacts and the dashboard API
 ```
 
 Deeper design notes: [docs/phase-1-ingestion.md](docs/phase-1-ingestion.md),
@@ -434,8 +514,9 @@ Deeper design notes: [docs/phase-1-ingestion.md](docs/phase-1-ingestion.md),
 [docs/phase-8-exam-dna.md](docs/phase-8-exam-dna.md),
 [docs/phase-9-concept-evolution.md](docs/phase-9-concept-evolution.md),
 [docs/phase-10-question-generation.md](docs/phase-10-question-generation.md),
-[docs/phase-11-advanced-assessment.md](docs/phase-11-advanced-assessment.md) and
-[docs/phase-12-dashboard-and-tutor.md](docs/phase-12-dashboard-and-tutor.md).
+[docs/phase-11-advanced-assessment.md](docs/phase-11-advanced-assessment.md),
+[docs/phase-12-dashboard-and-tutor.md](docs/phase-12-dashboard-and-tutor.md), and
+[docs/phase-13-personal-datasets.md](docs/phase-13-personal-datasets.md).
 Dataset/licensing workflow: [docs/datasets.md](docs/datasets.md).
 
 ## Configuration
@@ -550,6 +631,16 @@ Dataset/licensing workflow: [docs/datasets.md](docs/datasets.md).
 | `EXAM_ENGINE_Q11_EXCERPT_CHARS` | `240` | Evidence excerpt length kept per record (capped at 240) |
 | `EXAM_ENGINE_Q11_MIN_REFERENCE_OVERLAP` | `0.08` | Reference-overlap floor recorded in reports |
 | `EXAM_ENGINE_Q11_MAX_EVIDENCE` | `6` | Evidence excerpts kept per misconception record |
+| `EXAM_ENGINE_TUTOR_PROVIDER` | `auto` | `auto`/`ollama`/`openai`/`off`; `auto` prefers local Ollama |
+| `EXAM_ENGINE_TUTOR_OLLAMA_URL` | `http://127.0.0.1:11434` | Local Ollama endpoint |
+| `EXAM_ENGINE_TUTOR_MODEL` | unset | Preferred tutor model; otherwise a local model is auto-detected |
+| `EXAM_ENGINE_TUTOR_LLM_BASE_URL` | unset | OpenAI-compatible endpoint for a remote tutor model |
+| `EXAM_ENGINE_TUTOR_TIMEOUT` | `240` | Tutor model timeout, seconds |
+| `EXAM_ENGINE_TUTOR_WEB_SEARCH` | `auto` | `auto`, `exa`, `wikipedia` or `off` |
+| `EXAM_ENGINE_TUTOR_WEB_SOURCES` | `2` | Web sources attached to one answer (maximum 6) |
+| `EXAM_ENGINE_TUTOR_LOCAL_CONCEPTS` | `12` | Stored concept records given to the model |
+| `EXAM_ENGINE_TUTOR_LLM_API_KEY` / `OPENAI_API_KEY` | unset | Credential for an OpenAI-compatible tutor endpoint |
+| `EXA_API_KEY` | unset | Optional Exa semantic web search; Wikipedia needs no key |
 
 See [docs/phase-3-understanding.md](docs/phase-3-understanding.md) for the
 remaining candidate/top-k settings.
@@ -557,15 +648,18 @@ remaining candidate/top-k settings.
 ## Tests and checks
 
 ```bash
-python -m pytest                                     # 620 tests
+python -m pytest                                     # 743 tests
 python -m pytest --cov=exam_engine --cov-report=term-missing
 python -m ruff check src tests tools
 python -m ruff format --check src tests tools
 python -m mypy
-cd frontend && npm ci && npm run check:assets && npm test   # 16 Node tests
+cd frontend && npm ci && npm run check:assets && npm test   # 34 Node tests
 ```
 
-The dashboard has no frontend build step. `npm run check:assets` verifies every
+The dashboard has no frontend build step. A separate `npm run test:browser`
+check uses Playwright Core and the installed Chrome/Edge to exercise Practice
+answer checking and Draft approval against a disposable seeded database; it is
+not part of `npm test`. `npm run check:assets` verifies every
 local module/reference and the exact Hairline pin, licence and vendored bytes;
 `npm test` runs the pure state, chart, API-client, avatar and static-asset tests
 on Node's built-in runner.
@@ -613,7 +707,12 @@ tests, real analysis/fixture reads, the generation-scope integration,
 concept-expanding batches with distinct prompts, exact MCQ and lexical free-text
 answer checks, Draft/approval review behaviour, tutor grounding and refusal,
 background jobs, upload validation and cross-course rejection, HTTP/CSP/asset
-behaviour and foreign-origin rejection.
+behaviour and foreign-origin rejection. Phase 14 adds schema discovery and alias
+handling, passage/option/answer issue detection, local answer recovery and
+provenance states, release policy, review and rollback, report export and API
+read/write contracts. Phase 14.2 adds official-archive discovery, bounded
+HTML/PDF/ZIP retrieval and cache reuse, paper identity matching, official-key
+parsing, provenance/subpart projections and release-gate contracts.
 They do **not** establish that keyphrases, types, Bloom levels,
 difficulty, mappings, coverage findings, inferred concept changes or generated
 questions are educationally correct; no labelled benchmark is bundled, and segmentation
@@ -847,21 +946,28 @@ heuristics are deliberately conservative rather than benchmark-optimal.
 * Dashboard jobs are in-process and ephemeral: a restart clears job history, not
   the data the job wrote. There is no durable queue, cancellation or progress
   percentage. Long analyses still take as long as the underlying service.
-* The tutor is extractive retrieval over stored rows, not a language model. It
-  cannot answer outside the analysed corpus, ambiguous questions return concept
-  suggestions instead of a guess, and answer quality inherits Phase 2/3/5 identity
-  and mapping quality.
+* The tutor prefers a local Ollama model and can use an explicitly configured
+  OpenAI-compatible endpoint. Practice generation stays on the fast grounded
+  template by default; an OpenAI-compatible generation provider remains opt-in
+  through the Phase 10 settings. Model answers can take up to the configured timeout
+  (240 seconds by default), depend on the machine's model quality, and may use
+  general subject knowledge when stored and web sources are thin. With no model
+  available it falls back to extractive stored-record summaries; ambiguous
+  questions return concept suggestions instead of a guess. Concept quality still
+  inherits Phase 2/3/5 identity and mapping quality.
 * Practice answer checking is local and lexical. Multiple-choice answers are
   compared with the stored key; free text is scored by coverage of the stored
-  reference and syllabus-topic terms, so a correct paraphrase can be
-  under-credited and a keyword-heavy answer over-credited. It is formative
-  feedback, not a mark, and only stored generated questions can be checked.
-  Attempts are not persisted. Open conversational reasoning and forecasting
+  reference and syllabus-topic terms. Regular and listed irregular plurals plus
+  a small fixed set of common synonyms are normalized, but other paraphrases can
+  still be under-credited and a keyword-heavy answer over-credited. It is
+  formative feedback, not a mark, and only stored generated questions can be
+  checked. Attempts are not persisted. Forecasting and autonomous approval
   remain unavailable. The avatar and Hairline never compute or modify an
   assessment; avatar state is presentation only.
-* Browser verification for Phase 12 was manual Chromium testing, not an automated
-  E2E suite. Accessibility was checked structurally (skip link, focus, labels,
-  reduced motion) but not by a formal WCAG audit or screen-reader matrix.
+* Browser coverage now includes a narrow automated Chrome smoke test for Practice
+  answer checking and Draft approval, not a full E2E suite. Accessibility was
+  checked structurally (skip link, focus, labels, reduced motion) but not by a
+  formal WCAG audit or screen-reader matrix.
 * Phase 13 imports the user's local GATE, CBSE, JEE and NEET corpus in place. It
   does not establish educational correctness, examiner intent or student ability;
   it establishes source traceability and software behavior on those records.
@@ -883,10 +989,27 @@ heuristics are deliberately conservative rather than benchmark-optimal.
   review-only and inherits the source question's missing-answer and mapping limits.
 * Browser verification for Phase 13 covers the dataset workspace filters and API
   counts in Chromium; it is not an automated browser suite or a WCAG audit.
+* Phase 14.2 coverage is partial rather than corpus-wide. The latest run left
+  4,852 answers missing, recorded 35 answer conflicts, released 1,180 records and
+  left 5,902 review-required and 8,350 quarantined; 1,229 of the 1,271 recovered
+  answers are officially verified, all for GATE. No course is release-ready.
+  CBSE, JEE Advanced, JEE Main and NEET have documented blockers: missing marking
+  schemes, paper/set identity gaps, NTA question-ID requirements and unavailable
+  official pages. Snippets and unrelated keys are never treated as evidence.
+* Passage and subpart reconstruction is evidence-bounded. Records whose CSVs do
+  not retain enough boundary or numbering evidence remain whole, and no child
+  record is invented to fill a gap.
+* Repair proposals are heuristics and remain review-only. Deterministic option/key
+  repairs exist only in the separate repaired projection; medium/high-risk
+  subpart, extraction and answer proposals await review, and authenticity flags
+  are not confirmed fabrications.
+* Missing marks (10,636), missing MCQ options (4,852) and unknown types (2,755)
+  remain inherited data gaps; Phase 14 does not invent them. The recovery
+  dashboard is loopback-only and its browser checks are manual.
 
 ## Roadmap position
 
-Phases 1–13 are implemented: ingestion, text analysis, question understanding,
+Phases 1–14.2 are implemented: ingestion, text analysis, question understanding,
 read-only question-paper analytics, a persistent evidence-bearing knowledge graph,
 prerequisite discovery with explainable learning paths, an evidence-backed
 coverage-gap detector, a historical Exam DNA pattern profile, a read-only concept
@@ -894,7 +1017,10 @@ evolution tracker, grounded automatic question generation with named validation
 checks, deduplication and human review, advanced assessment intelligence (question
 mutation with declared invariants, fair adversarial questions with rubrics, and
 evidence-bounded misconception mining with review), the integrated local workspace,
-and validated personal GATE/CBSE/JEE/NEET dataset integration. The design stays
+and validated personal GATE/CBSE/JEE/NEET dataset integration, plus an evidence-first
+dataset recovery layer with answer provenance, quality scoring, release policy,
+review and rollback, plus bounded official-archive retrieval for GATE, CBSE, JEE and
+NEET. The design stays
 extensible: adapters, OCR, embedding/entity providers, classifiers and graph
 storage backends are replaceable; segmentation and topic models are pure functions
 of their inputs; provenance and per-record uncertainty are first-class; and course

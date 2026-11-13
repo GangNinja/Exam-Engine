@@ -520,6 +520,7 @@ from exam_engine.cli_generation import register_generation_commands  # noqa: E40
 from exam_engine.cli_graph import register_graph_commands  # noqa: E402
 from exam_engine.cli_nlp import register_nlp_commands  # noqa: E402
 from exam_engine.cli_prerequisite import register_prerequisite_commands  # noqa: E402
+from exam_engine.cli_recovery import register_recovery_commands  # noqa: E402
 from exam_engine.cli_understanding import register_understanding_commands  # noqa: E402
 
 register_nlp_commands(app, open_db=_open, get_settings=_settings)
@@ -534,6 +535,7 @@ register_generation_commands(app, open_db=_open, get_settings=_settings)
 register_advanced_commands(app, open_db=_open, get_settings=_settings)
 register_dashboard_commands(app, get_settings=_settings)
 register_exams_commands(app, open_db=_open, get_settings=_settings)
+register_recovery_commands(app, open_db=_open, get_settings=_settings)
 
 
 if __name__ == "__main__":  # pragma: no cover

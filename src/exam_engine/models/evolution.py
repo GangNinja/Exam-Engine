@@ -157,7 +157,9 @@ class ChangeSide(BaseModel):
     document_id: str
     document_title: str
     date: Date | None = None
+    date_to: Date | None = None
     date_type: EvolutionDateType = EvolutionDateType.UNKNOWN
+    period: str | None = None
     term: str | None = None
     unit_label: str | None = None
     excerpt: str = ""
@@ -184,6 +186,13 @@ class ConceptChange(BaseModel):
     review_required: bool = True
     review_status: EvolutionReviewStatus = EvolutionReviewStatus.PENDING_REVIEW
     explanation: str = Field(..., min_length=1)
+    change_summary: str | None = Field(
+        default=None,
+        description=(
+            "Concise, visible statement of the observed change; review aid, not a "
+            "conclusion."
+        ),
+    )
     evidence: list[str] = Field(default_factory=list)
     warnings: list[Uncertainty] = Field(default_factory=list)
     limitations: list[str] = Field(default_factory=list)
@@ -259,6 +268,9 @@ class AssessmentWindow(BaseModel):
     )
     period_to: str | None = None
     questions: int = Field(default=0, ge=0)
+    analysed_questions: int = Field(default=0, ge=0)
+    type_labelled_questions: int = Field(default=0, ge=0)
+    bloom_labelled_questions: int = Field(default=0, ge=0)
     papers: int = Field(default=0, ge=0)
     sessions: int = Field(default=0, ge=0)
     document_ids: list[str] = Field(default_factory=list)

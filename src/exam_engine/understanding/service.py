@@ -5,8 +5,10 @@ It never re-parses a source file, never invents missing text or marks, and never
 falls back to another course's syllabus. Every course run replaces its own
 derived rows, so changed text or a changed syllabus produces fresh results.
 
-Outcomes are allowed to be uncertain: questions can be UNMAPPED, have no type,
-have no Bloom level, or carry a provisional difficulty estimate.
+Outcomes are allowed to be uncertain: questions can be UNMAPPED or carry a
+provisional difficulty estimate. Type and Bloom classifications use a defined
+low-confidence fallback when no cue reaches the configured threshold, so the
+dashboard never has to display an unclassified category.
 """
 
 from __future__ import annotations
@@ -54,8 +56,8 @@ from exam_engine.storage.repositories import (
 from exam_engine.understanding.classification import (
     Classification,
     DifficultyResult,
-    classify_bloom,
-    classify_question_types,
+    ensure_bloom_level,
+    ensure_question_types,
     estimate_difficulty,
 )
 from exam_engine.understanding.mapping import (
@@ -80,6 +82,11 @@ from exam_engine.understanding.taxonomy import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Service-level aliases keep the one-question failure boundary patchable by the
+# existing phase-3 service tests while using the fallback-aware classifiers.
+classify_question_types = ensure_question_types
+classify_bloom = ensure_bloom_level
 
 TYPE_METHOD = "cue_rules"
 BLOOM_METHOD = "cue_rules"
@@ -204,10 +211,14 @@ class UnderstandingService:
         self._finish_run(report)
         return report
 
-    def status(self) -> list[dict[str, Any]]:
+    def status(self, course_id: str | None = None) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
         with self.db.session() as session:
-            courses = CourseRepository(session).list()
+            if course_id:
+                course = CourseRepository(session).get(course_id)
+                courses = [course] if course else []
+            else:
+                courses = CourseRepository(session).list()
             analysis_repo = QuestionUnderstandingRepository(session)
             run_repo = UnderstandingRunRepository(session)
             questions = QuestionRepository(session)

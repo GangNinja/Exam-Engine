@@ -83,6 +83,7 @@ from exam_engine.models.exam_dna import ExamDnaRequest
 from exam_engine.models.question import QuestionRecord, Uncertainty
 from exam_engine.models.syllabus import SyllabusRecord, SyllabusUnitRecord
 from exam_engine.models.understanding import QuestionAnalysis, UnitMatch
+from exam_engine.nlp.concept_quality import concept_noise_reason
 from exam_engine.nlp.keywords import normalize_term
 from exam_engine.storage.db import Database
 from exam_engine.storage.graph_repository import GraphRepository
@@ -839,6 +840,8 @@ class ConceptEvolutionService:
             for unit in syllabus.units:
                 data.units[normalize_term(unit.unit_label)] = unit
                 for topic in unit.topics:
+                    if concept_noise_reason(topic) is not None:
+                        continue
                     alias = normalize_term(topic)
                     if not alias:
                         continue
@@ -1438,6 +1441,8 @@ class ConceptEvolutionService:
         similarity = _jaccard(early.excerpt, late.excerpt)
         if similarity >= self.settings.context_similarity_threshold:
             return None
+        earlier_date = early.date.isoformat() if early.date else "undated"
+        later_date = late.date.isoformat() if late.date else "undated"
         return self._change(
             ConceptChangeCategory.CONTEXT_CHANGED,
             timeline,
@@ -1447,14 +1452,17 @@ class ConceptEvolutionService:
             confidence=0.55,
             quality=EvidenceQuality.LOW,
             explanation=(
-                f"The earliest and latest dated excerpts for {timeline.canonical_label!r} "
-                f"share only {similarity:.0%} of their normalized tokens; the surrounding "
-                "context appears to differ."
+                f"The dated examples for {timeline.canonical_label!r} use different contexts. "
+                f"Earlier ({earlier_date}): \"{_truncate_text(early.excerpt, 140)}\" "
+                f"Later ({later_date}): \"{_truncate_text(late.excerpt, 140)}\" "
+                f"The excerpts share only {similarity:.0%} of their normalized wording, so the "
+                "context may have shifted; this is a review signal, not a proven change in meaning."
             ),
             review_required=True,
             evidence=[
-                f"lexical similarity {similarity:.4f}",
-                f"threshold {self.settings.context_similarity_threshold:.2f}",
+                f"Earlier example date: {earlier_date}",
+                f"Later example date: {later_date}",
+                f"Lexical overlap: {similarity:.0%}",
             ],
             warnings=[_warning("evolution_context_similarity")],
             limitations=[
@@ -1462,6 +1470,162 @@ class ConceptEvolutionService:
                 "pair for manual review.",
             ],
         )
+
+    @staticmethod
+    def _window_date_label(window: AssessmentWindow) -> str:
+        if window.date_from is not None:
+            if window.date_to is not None and window.date_to != window.date_from:
+                return f"{window.date_from.isoformat()} to {window.date_to.isoformat()}"
+            return window.date_from.isoformat()
+        if window.period_from:
+            if window.period_to and window.period_to != window.period_from:
+                return f"{window.period_from} to {window.period_to}"
+            return window.period_from
+        return "undated"
+
+    @staticmethod
+    def _window_period_label(window: AssessmentWindow) -> str | None:
+        if not window.period_from:
+            return None
+        if window.period_to and window.period_to != window.period_from:
+            return f"{window.period_from}..{window.period_to}"
+        return window.period_from
+
+    @staticmethod
+    def _window_distribution(counts: dict[str, int], shares: dict[str, float]) -> str:
+        total = sum(counts.values())
+        if not total:
+            return ""
+        parts = [
+            f"{label.replace('_', ' ')} {count}/{total} ({shares.get(label, 0.0):.0%})"
+            for label, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+        ]
+        return ", ".join(parts)
+
+    @classmethod
+    def _window_side_summary(cls, window: AssessmentWindow) -> str:
+        parts = [f"{window.questions} question(s)"]
+        if window.type_labelled_questions and window.type_labelled_questions != window.questions:
+            parts.append(f"{window.type_labelled_questions} classified")
+        type_text = cls._window_distribution(window.type_counts, window.type_shares)
+        bloom_text = cls._window_distribution(window.bloom_counts, window.bloom_shares)
+        if type_text:
+            parts.append(f"question types: {type_text}")
+        if bloom_text:
+            parts.append(f"Bloom levels: {bloom_text}")
+        if window.known_marks:
+            parts.append(f"known marks: {window.known_marks:g}")
+        return " · ".join(parts)
+
+    def _assessment_share_changes(
+        self, assessment: ConceptAssessment
+    ) -> list[tuple[float, str]]:
+        """Concrete type/Bloom/marks movements that crossed the change threshold."""
+        earlier = assessment.earlier
+        later = assessment.later
+        minimum = self.settings.min_assessment_questions
+        dimensions = [
+            (
+                "question type",
+                earlier.type_counts,
+                later.type_counts,
+                earlier.type_shares,
+                later.type_shares,
+                earlier.type_labelled_questions >= minimum
+                and later.type_labelled_questions >= minimum,
+            ),
+            (
+                "Bloom level",
+                earlier.bloom_counts,
+                later.bloom_counts,
+                earlier.bloom_shares,
+                later.bloom_shares,
+                earlier.bloom_labelled_questions >= minimum
+                and later.bloom_labelled_questions >= minimum,
+            ),
+            (
+                "marks value",
+                earlier.marks_counts,
+                later.marks_counts,
+                earlier.marks_shares,
+                later.marks_shares,
+                earlier.questions_with_marks >= minimum
+                and later.questions_with_marks >= minimum,
+            ),
+        ]
+        changes: list[tuple[float, str]] = []
+        for (
+            dimension,
+            early_counts,
+            late_counts,
+            early_shares,
+            late_shares,
+            ready,
+        ) in dimensions:
+            if not ready:
+                continue
+            early_total = sum(early_counts.values())
+            late_total = sum(late_counts.values())
+            if not early_total or not late_total:
+                continue
+            for label in sorted(set(early_counts) | set(late_counts)):
+                early_share = early_shares.get(label, 0.0)
+                late_share = late_shares.get(label, 0.0)
+                delta = late_share - early_share
+                if abs(delta) < self.settings.assessment_share_delta:
+                    continue
+                changes.append(
+                    (
+                        abs(delta),
+                        f"{dimension} {label.replace('_', ' ')}: "
+                        f"{early_counts.get(label, 0)}/{early_total} ({early_share:.0%}) "
+                        f"-> {late_counts.get(label, 0)}/{late_total} ({late_share:.0%}), "
+                        f"{delta * 100:+.0f} percentage points",
+                    )
+                )
+        changes.sort(key=lambda item: (-item[0], item[1]))
+        return changes
+
+    def _assessment_explanation(
+        self, timeline: ConceptTimeline, assessment: ConceptAssessment
+    ) -> tuple[str, list[str]]:
+        earlier = assessment.earlier
+        later = assessment.later
+        earlier_label = self._window_date_label(earlier)
+        later_label = self._window_date_label(later)
+        changes = self._assessment_share_changes(assessment)
+        early_distribution = self._window_distribution(
+            earlier.type_counts, earlier.type_shares
+        )
+        late_distribution = self._window_distribution(later.type_counts, later.type_shares)
+        lines = [
+            f"For {timeline.canonical_label!r}, the earlier window ({earlier_label}) "
+            f"has {earlier.questions} mapped question(s); the later window ({later_label}) "
+            f"has {later.questions} mapped question(s)."
+        ]
+        if early_distribution or late_distribution:
+            lines.append(
+                f"Question types (classified questions only) — earlier: "
+                f"{early_distribution or 'none analysed'}; later: "
+                f"{late_distribution or 'none analysed'}."
+            )
+        if changes:
+            lines.append("Changes: " + "; ".join(item[1] for item in changes[:5]) + ".")
+        else:
+            lines.append(
+                "The windows differ in assessed composition, but no individual share "
+                "crossed the configured change threshold."
+            )
+        lines.append(
+            "This is a dated observation from the analysed corpus, not proof of an "
+            "official syllabus change."
+        )
+        evidence = [
+            f"Earlier window: {earlier_label}; {self._window_side_summary(earlier)}",
+            f"Later window: {later_label}; {self._window_side_summary(later)}",
+            *[item[1] for item in changes[:5]],
+        ]
+        return " ".join(lines), evidence
 
     def _assessment_change_for(
         self, timeline: ConceptTimeline, loaded: _Loaded
@@ -1476,30 +1640,56 @@ class ConceptEvolutionService:
         later_document = assessment.later.document_ids[0] if assessment.later.document_ids else ""
 
         def side(window: AssessmentWindow, document_id: str) -> ChangeSide:
-            period = window.period_from or ""
-            if window.period_to and window.period_to != period:
-                period = f"{period}..{window.period_to}" if period else window.period_to
             return ChangeSide(
                 document_id=document_id,
                 document_title=titles.get(document_id, document_id),
                 date=window.date_from,
+                date_to=window.date_to,
                 date_type=(
                     EvolutionDateType.EXAMINATION
                     if window.date_from is not None
                     else EvolutionDateType.UNKNOWN
                 ),
-                excerpt=(
-                    f"{window.questions} question(s), {window.known_marks:g} known marks"
-                    + (f", period {period}" if period else "")
-                ),
+                period=self._window_period_label(window),
+                excerpt=self._window_side_summary(window),
             )
 
-        order_known = bool(
-            assessment.earlier.period_from
-            and assessment.later.period_from
-            and (assessment.earlier.period_from, assessment.earlier.period_to or "")
-            < (assessment.later.period_from, assessment.later.period_to or "")
+        earlier_period = assessment.earlier.period_from
+        later_period = assessment.later.period_from
+        period_order_known = bool(
+            earlier_period
+            and later_period
+            and (earlier_period, assessment.earlier.period_to or "")
+            < (later_period, assessment.later.period_to or "")
         )
+        date_order_known = bool(
+            assessment.earlier.date_from
+            and assessment.later.date_from
+            and assessment.earlier.date_from < assessment.later.date_from
+        )
+        order_known = period_order_known or date_order_known
+        explanation, evidence = self._assessment_explanation(timeline, assessment)
+        share_changes = self._assessment_share_changes(assessment)
+        # Name the strongest movement in each dimension so the visible summary
+        # does not omit a changed dimension just because several labels moved.
+        summary_parts: list[str] = []
+        for dimension in ("question type", "Bloom level", "marks value"):
+            candidates = [
+                item for item in share_changes if item[1].startswith(f"{dimension} ")
+            ]
+            if candidates:
+                summary_parts.append(max(candidates, key=lambda item: (item[0], item[1]))[1])
+        if summary_parts:
+            change_summary = "; ".join(summary_parts) + "."
+        elif assessment.reasons:
+            change_summary = "; ".join(
+                reason[0].upper() + reason[1:] for reason in assessment.reasons
+            ) + "."
+        else:
+            change_summary = (
+                "The windows differ in assessed composition, but no individual type, "
+                "Bloom, or marks share crossed the configured change threshold."
+            )
         return ConceptChange(
             change_id=make_change_id(
                 f"{ConceptChangeCategory.ASSESSMENT_PATTERN_CHANGED.value}\x1f{timeline.concept_id}"
@@ -1517,20 +1707,9 @@ class ConceptEvolutionService:
             >= self.settings.min_assessment_questions + 1
             else EvidenceQuality.LOW,
             review_required=True,
-            explanation=(
-                f"Question-mapped assessment of {timeline.canonical_label!r} differs between "
-                f"the earlier and later dated windows: " + "; ".join(assessment.reasons)
-            ),
-            evidence=[
-                f"earlier: {assessment.earlier.questions} question(s)",
-                f"later: {assessment.later.questions} question(s)",
-                f"earlier period: {assessment.earlier.period_from or 'unknown'}",
-                f"later period: {assessment.later.period_from or 'unknown'}",
-                f"max type share delta: {assessment.max_type_share_delta}",
-                f"max Bloom share delta: {assessment.max_bloom_share_delta}",
-                f"max marks share delta: {assessment.max_marks_share_delta}",
-                f"repetition counts: {assessment.later.repetition_counts}",
-            ],
+            explanation=explanation,
+            change_summary=change_summary,
+            evidence=evidence,
             limitations=[
                 "Question counts and shares describe the analyzed corpus only; they are not a "
                 "measure of educational importance.",
@@ -2330,16 +2509,49 @@ class ConceptEvolutionService:
         max_bloom = max(bloom_deltas.values()) if bloom_deltas else None
         max_marks = max(marks_deltas.values()) if marks_deltas else None
         reasons: list[str] = []
+        type_ready = (
+            early.type_labelled_questions >= minimum
+            and later.type_labelled_questions >= minimum
+        )
+        bloom_ready = (
+            early.bloom_labelled_questions >= minimum
+            and later.bloom_labelled_questions >= minimum
+        )
+        marks_ready = (
+            early.questions_with_marks >= minimum
+            and later.questions_with_marks >= minimum
+        )
         if len(early_rows) >= minimum and len(late_rows) >= minimum:
-            if max_type is not None and max_type >= self.settings.assessment_share_delta:
+            if (
+                type_ready
+                and max_type is not None
+                and max_type >= self.settings.assessment_share_delta
+            ):
                 label = max(type_deltas.items(), key=lambda item: item[1])[0]
                 reasons.append(f"question-type share for {label!r} changed by {max_type:.0%}")
-            if max_bloom is not None and max_bloom >= self.settings.assessment_share_delta:
+            if (
+                bloom_ready
+                and max_bloom is not None
+                and max_bloom >= self.settings.assessment_share_delta
+            ):
                 label = max(bloom_deltas.items(), key=lambda item: item[1])[0]
                 reasons.append(f"Bloom-level share for {label!r} changed by {max_bloom:.0%}")
-            if max_marks is not None and max_marks >= self.settings.assessment_share_delta:
+            if (
+                marks_ready
+                and max_marks is not None
+                and max_marks >= self.settings.assessment_share_delta
+            ):
                 label = max(marks_deltas.items(), key=lambda item: item[1])[0]
                 reasons.append(f"marks-value share for {label!r} changed by {max_marks:.0%}")
+        if not type_ready and early.type_labelled_questions and later.type_labelled_questions:
+            limitations.append(
+                f"needs at least {minimum} classified questions per window for question-type "
+                "comparison; the windows contain too few labelled questions"
+            )
+        if not bloom_ready and early.bloom_labelled_questions and later.bloom_labelled_questions:
+            limitations.append(
+                f"needs at least {minimum} classified questions per window for Bloom comparison"
+            )
         return ConceptAssessment(
             concept_id=concept_id,
             label=concept.label,
@@ -2388,6 +2600,8 @@ class ConceptEvolutionService:
             if analysis is not None and analysis.bloom_primary is not None
         )
         analysed = sum(1 for analysis in analyses if analysis is not None)
+        type_labelled = sum(type_counts.values())
+        bloom_labelled = sum(bloom_counts.values())
         with_marks = [item for item in questions if item.marks is not None]
         known_marks = _round(sum(item.marks or 0.0 for item in with_marks))
         marks_counts = Counter(f"{item.marks:g}" for item in with_marks)
@@ -2420,6 +2634,9 @@ class ConceptEvolutionService:
             period_from=periods[0] if periods else None,
             period_to=periods[-1] if periods else None,
             questions=len(questions),
+            analysed_questions=analysed,
+            type_labelled_questions=type_labelled,
+            bloom_labelled_questions=bloom_labelled,
             papers=len({question.document_id for question in questions}),
             sessions=len(sessions),
             document_ids=sorted({question.document_id for question in questions}),
@@ -2431,14 +2648,14 @@ class ConceptEvolutionService:
             unit_counts=dict(sorted(unit_counts.items())),
             repetition_counts=dict(sorted(repetition_counts.items())),
             type_shares={
-                value: _round(count / analysed)
+                value: _round(count / type_labelled)
                 for value, count in sorted(type_counts.items())
-                if analysed
+                if type_labelled
             },
             bloom_shares={
-                value: _round(count / analysed)
+                value: _round(count / bloom_labelled)
                 for value, count in sorted(bloom_counts.items())
-                if analysed
+                if bloom_labelled
             },
             marks_shares={
                 value: _round(count / len(with_marks))

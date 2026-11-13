@@ -32,6 +32,7 @@ from exam_engine.models.nlp import ConceptRecord
 from exam_engine.models.question import QuestionRecord, Uncertainty
 from exam_engine.models.syllabus import SyllabusRecord, SyllabusUnitRecord
 from exam_engine.models.understanding import QuestionAnalysis, SimilarityMatch, UnitMatch
+from exam_engine.nlp.concept_quality import concept_noise_reason
 from exam_engine.nlp.keywords import normalize_term
 
 _STATUS_PRIORITY = {
@@ -535,6 +536,8 @@ class GraphBuilder:
         assert self._data is not None
         for unit in self._unit_by_id.values():
             for topic in unit.topics:
+                if concept_noise_reason(topic) is not None:
+                    continue
                 self._add_concept_seed(
                     topic,
                     origin=ConceptOrigin.SYLLABUS,
@@ -546,6 +549,8 @@ class GraphBuilder:
             if concept.origin is ConceptOrigin.INFERRED and not (
                 self.settings.include_inferred_concepts
             ):
+                continue
+            if concept_noise_reason(concept.term) is not None:
                 continue
             self._add_concept_seed(
                 concept.term,
@@ -706,6 +711,8 @@ class GraphBuilder:
         source_document_id: str | None = None,
         source_page: int | None = None,
     ) -> str | None:
+        if concept_noise_reason(label) is not None:
+            return None
         normalized = normalize_term(label)
         if not normalized:
             return None

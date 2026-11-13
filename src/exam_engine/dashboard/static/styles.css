@@ -671,7 +671,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
 .bar-negative .chart-bar { fill: var(--negative); }
 .bar-warning .chart-bar { fill: var(--warning); }
 .bar-neutral .chart-bar { fill: var(--line-strong); }
-.chart-grid { fill: none; stroke: var(--line); stroke-width: 1; }
+.chart-grid-lines { fill: none; stroke: var(--line); stroke-width: 1; }
 .chart-line { fill: none; stroke: var(--accent); stroke-width: 2.2; }
 .chart-dot { fill: var(--surface); stroke: var(--accent); stroke-width: 2; }
 .chart-axis-label, .chart-tick { font-family: var(--font-mono); font-size: 9.5px; fill: var(--muted); }

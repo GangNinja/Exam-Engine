@@ -518,6 +518,8 @@ def test_service_build_is_idempotent_and_reports_evidence() -> None:
         assert service.validate(COURSE) == []
         rows = service.status()
         assert rows[0]["dangling_edges"] is False
+        # The course-scoped status path must return the same row as the bulk path.
+        assert service.status(COURSE) == rows
         # The fixture has ambiguous Phase 3 mappings; those must remain candidates.
         assert rows[0]["candidate_edges"] > 0
         # The build report counts course-scoped rows; shared institution/subject
@@ -1077,6 +1079,8 @@ def test_shared_subject_edge_survives_sibling_builds_and_prunes_when_unused() ->
             versions[0].course_id: 2,
             versions[1].course_id: 2,
         }
+        for course in versions:
+            assert service.status(course.course_id) == [status[course.course_id]]
         with database.session() as session:
             repo = GraphRepository(session)
             shared_edges = [

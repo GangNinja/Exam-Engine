@@ -589,6 +589,71 @@ def test_zero_mapped_questions_is_unmapped_and_not_a_future_exam_claim() -> None
         database.close()
 
 
+def test_topic_fallback_is_opt_in_and_keeps_its_provenance() -> None:
+    database = memory_database()
+    try:
+        _add_course(database)
+        syllabus = _add_syllabus(
+            database,
+            units=[
+                (
+                    "Unit 1",
+                    "Biochemistry",
+                    [
+                        "Enzymes, types and action",
+                        "Photosynthesis",
+                        "Respiration",
+                        "Cell division",
+                        "Genetics",
+                        "Ecology",
+                    ],
+                )
+            ],
+        )
+        questions = _add_paper(
+            database,
+            COURSE,
+            "doc_topic_fallback",
+            title="Fallback paper",
+            session="2024-05",
+            questions=[("q1", "Explain enzyme action and classification.", 4.0)],
+        )
+        _add_analysis(
+            database,
+            COURSE,
+            syllabus,
+            questions["q1"],
+            status=MappingStatus.UNMAPPED,
+        )
+
+        default = _report(database, syllabus=syllabus)
+        assert default.concepts[0].distinct_question_count == 0
+
+        fallback = _service(database).analyze(
+            CoverageRequest(course_id=COURSE, syllabus_id=syllabus.syllabus_id),
+            include_topic_fallback=True,
+        )
+        enzyme = next(item for item in fallback.concepts if item.label.startswith("Enzymes"))
+        assert enzyme.distinct_question_count == 1
+        assert enzyme.supporting_questions[0].mapping_sources == ["coverage_topic_fallback"]
+        assert "enzyme" in enzyme.supporting_questions[0].matched_terms
+        assert fallback.summary.mapped_questions == 1
+
+        complete = _service(database).analyze(
+            CoverageRequest(course_id=COURSE, syllabus_id=syllabus.syllabus_id),
+            include_topic_fallback=True,
+            include_question_assignments=True,
+        )
+        assert len(complete.question_assignments) == complete.summary.total_questions
+        assert all(
+            0.75 <= assignment.confidence <= 1.0
+            for assignment in complete.question_assignments
+        )
+        assert complete.question_assignments[0].concept_id == enzyme.concept_id
+    finally:
+        database.close()
+
+
 def test_unmapped_question_is_not_labelled_out_of_syllabus() -> None:
     database = memory_database()
     try:

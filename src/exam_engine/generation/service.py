@@ -459,6 +459,7 @@ class QuestionGenerationService:
                     evidence=tuple(question.source_references),
                     thin_evidence=self._thin_evidence(question),
                     phase3_available=question.estimated_bloom is not None,
+                    answer_key_required=request.include_answer_key,
                 ),
             )
             question.warnings = warnings_from_validation(question.validation)
@@ -1328,6 +1329,19 @@ class QuestionGenerationService:
                 continue
             labels.append(item.label)
         labels = labels[: self.settings.max_related_labels]
+        if request.format is GenerationFormat.MULTIPLE_CHOICE and request.concept_ids:
+            # An explicitly selected concept may sit in a one-concept unit.  Draw
+            # additional course-level alternatives only for that UI flow; unit/random
+            # selections keep their original scope so quality tests remain strict.
+            for item in loaded.concepts:
+                if item.concept_id == concept.concept_id or item.label in labels:
+                    continue
+                labels.append(item.label)
+                # Keep a wider pool than the visible option count.  The provider
+                # can then prefer alternatives that are absent from a topic-list
+                # stem instead of reusing the topics named in that stem.
+                if len(labels) >= max(14, self.settings.min_mcq_options * 2):
+                    break
         # A comparison needs grounding for the second concept. Same-unit siblings are
         # offered as options first, so they are tried first here too; a graph relation
         # is only a fallback when no sibling has usable evidence.
@@ -1352,11 +1366,9 @@ class QuestionGenerationService:
             if word.casefold() not in {item.casefold() for item in terms}:
                 terms.append(word)
         verb = OBJECTIVE_VERBS[plan.bloom]
-        objective = f"{verb} {concept.label} in {concept.unit_label}"
-        if concept.unit_title and normalize_term(concept.unit_title) != normalize_term(
-            concept.unit_label
-        ):
-            objective += f" ({concept.unit_title})"
+        # Unit identity remains in the structured unit_id/unit_label fields.  Do not
+        # repeat it in the learner-facing objective or question text.
+        objective = f"{verb} {concept.label}"
         return GenerationPrompt(
             course_id=loaded.course.course_id,
             syllabus_id=loaded.syllabus.syllabus_id,
@@ -1402,6 +1414,7 @@ class QuestionGenerationService:
                 continue
             patterns = full_patterns if exact else word_patterns
             excerpt = _focus_excerpt(sentence.text, patterns, self.settings.max_evidence_chars)
+            excerpt = _clean_extraction_text(excerpt)
             if _structural_fragment(excerpt):
                 # A table row or layout fragment mentions the concept but does not
                 # describe it; it cannot ground a question.
@@ -1425,31 +1438,65 @@ class QuestionGenerationService:
             )
             for _rank, _priority, _length, excerpt, sentence in matches[:limit]
         ]
+        unit = next((item for item in loaded.units if item.unit_id == concept.unit_id), None)
+        unit_topics = [
+            _clean_extraction_text(topic)
+            for topic in (unit.topics if unit else [])
+            if _clean_extraction_text(topic)
+        ]
+        unit_topics = [
+            topic
+            for topic in unit_topics
+            if normalize_term(topic) == concept.normalized
+            or (
+                not re.search(r"\b\d+\b", topic)
+                and "marks" not in topic.casefold()
+                and "page " not in topic.casefold()
+            )
+        ]
+        unit_excerpt = ""
+        if unit_topics:
+            matching = [
+                topic
+                for topic in unit_topics
+                if normalize_term(topic) == concept.normalized
+            ]
+            if matching:
+                # Keep the selected topic first so a case/context excerpt is about
+                # this concept, not a general unit preface.
+                unit_topics = [
+                    *matching,
+                    *(topic for topic in unit_topics if topic not in matching),
+                ]
+            elif concept.normalized:
+                unit_topics = [concept.label, *unit_topics]
+            unit_excerpt = _clip(
+                "; ".join(unit_topics[:20]), self.settings.max_evidence_chars
+            )
+        unit_passage = SourcePassage(
+            document_id=loaded.syllabus.document_id or loaded.syllabus.syllabus_id,
+            document_title=loaded.syllabus.title or "Syllabus",
+            document_kind=DocumentKind.SYLLABUS,
+            page_number=(unit.page_number if unit else None),
+            excerpt=unit_excerpt or _clip(concept.label, self.settings.max_evidence_chars),
+            concept_id=concept.concept_id,
+            method=("syllabus_unit_topics" if unit_excerpt else "syllabus_concept_label"),
+        )
         if passages:
+            # A short notes sentence is not enough context for a case, and a topic
+            # list is not enough to make a discriminating multiple-choice stem.
+            # Offer the whole syllabus section as additional, clearly labelled
+            # evidence without replacing the exact passage.
+            if unit_excerpt and (
+                len(unit_excerpt) >= 160
+                or len(unit_excerpt) > max(len(item.excerpt) for item in passages)
+            ):
+                passages = [*passages, unit_passage]
             return passages
 
-        unit = next((item for item in loaded.units if item.unit_id == concept.unit_id), None)
-        topics = [
-            topic
-            for topic in (unit.topics if unit else [])
-            if normalize_term(topic) == concept.normalized
-        ]
-        if not topics and concept.normalized:
-            topics = [concept.label]
-        document_id = loaded.syllabus.document_id or loaded.syllabus.syllabus_id
-        title = loaded.syllabus.title or "Syllabus"
-        return [
-            SourcePassage(
-                document_id=document_id,
-                document_title=title,
-                document_kind=DocumentKind.SYLLABUS,
-                page_number=(unit.page_number if unit else None),
-                excerpt=_clip(topic, self.settings.max_evidence_chars),
-                concept_id=concept.concept_id,
-                method=("syllabus_topic" if topic != concept.label else "syllabus_concept_label"),
-            )
-            for topic in topics[:1]
-        ]
+        if not unit_excerpt:
+            return [unit_passage]
+        return [unit_passage]
 
     def _assemble(
         self,
@@ -1583,11 +1630,17 @@ class QuestionGenerationService:
     def _foreign_labels(self, loaded: _Loaded) -> list[str]:
         """Concept terms that belong to *other* courses, used as a leakage check."""
         with self.db.session() as session:
-            terms = ConceptRepository(session).list_foreign_terms(
-                loaded.course.course_id, limit=800
-            )
+            repository = ConceptRepository(session)
+            terms = repository.list_foreign_terms(loaded.course.course_id, limit=800)
+            # Validate against every concept stored for this course, including
+            # concepts that could not be placed in a unit.  Their topic names can
+            # legitimately appear in a syllabus excerpt even though they are not
+            # generation targets.
+            own_records = repository.list_by_course(loaded.course.course_id)
         own = {item.label.casefold() for item in loaded.concepts}
         own |= {item.normalized for item in loaded.concepts}
+        own |= {item.term.casefold() for item in own_records}
+        own |= {item.normalized for item in own_records}
         return sorted({term for term in terms if term.casefold() not in own})
 
     # -- similarity pools --------------------------------------------------
@@ -2003,6 +2056,26 @@ class ScopeConcept:
     aliases: tuple[str, ...] = ()
     verified: bool = False
     graph_node_ids: tuple[str, ...] = ()
+
+
+_UNIT_REFERENCE_RE = re.compile(
+    r"\bUnit\s+(?:Marks\s+)?(?:[0-9]+|[IVXLCDM]+)\b(?:\s*\([^)]*\))?\s*[:.\-\u2013\u2014]?\s*",
+    re.IGNORECASE,
+)
+
+
+def _clean_extraction_text(text: str) -> str:
+    """Drop extraction artefacts and learner-irrelevant unit headings."""
+    cleaned = "".join(
+        " "
+        if ord(character) == 0xFFFD
+        or 0xE000 <= ord(character) <= 0xF8FF
+        or ord(character) < 32
+        else character
+        for character in text
+    )
+    cleaned = _UNIT_REFERENCE_RE.sub(" ", cleaned)
+    return " ".join(cleaned.split()).strip(" .,;:…")
 
 
 def _structural_fragment(text: str) -> bool:

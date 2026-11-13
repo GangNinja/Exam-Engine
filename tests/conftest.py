@@ -11,6 +11,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SAMPLE_MANIFEST = PROJECT_ROOT / "datasets" / "sample" / "manifest.json"
 
 
+@pytest.fixture(autouse=True)
+def _keep_tutor_offline(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tests must never load a local model or make a web request."""
+
+    monkeypatch.setenv("EXAM_ENGINE_TUTOR_PROVIDER", "off")
+    monkeypatch.setenv("EXAM_ENGINE_TUTOR_WEB_SEARCH", "off")
+
+
 @pytest.fixture()
 def database() -> Database:
     db = memory_database()

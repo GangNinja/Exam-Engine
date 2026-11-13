@@ -8,11 +8,11 @@ import { TUTOR_STATES } from "./ui-state.js";
 
 const CAPTIONS = {
   idle: "Idle — ready for a course question.",
-  thinking: "Thinking — searching stored course evidence.",
-  speaking: "Explaining — reading from stored records.",
+  thinking: "Thinking — searching course evidence and live sources.",
+  speaking: "Explaining — using cited evidence and subject knowledge.",
   positive: "Completed — the backend returned a real result.",
-  corrective: "Needs attention — the evidence is incomplete.",
-  warning: "Unavailable — this capability is not implemented.",
+  corrective: "Needs attention — the question or evidence is incomplete.",
+  warning: "Unavailable — check the tutor model or retry.",
 };
 
 export function createTutorAvatar(container) {

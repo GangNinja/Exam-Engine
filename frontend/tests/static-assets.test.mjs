@@ -62,3 +62,79 @@ test("Hairline provenance records the licence and vendored bytes", async () => {
   assert.match(provenance.sha256, /^[a-f0-9]{64}$/);
   assert.equal(provenance.runtime_network_access, false);
 });
+
+test("tutor distinguishes an offline evidence summary from a model answer", async () => {
+  const tutor = await readFile(resolve(staticDir, "views/tutor.js"), "utf8");
+  assert.match(tutor, /Offline teacher answer from stored syllabus and past-paper evidence\./);
+  assert.match(tutor, /response\.status === "answered"\s*\? response\.ai/);
+});
+
+test("upload errors do not append a literal null when no issue list is present", async () => {
+  const course = await readFile(resolve(staticDir, "views/course.js"), "utf8");
+  assert.match(course, /const errorDetails = error\?\.detail\?\.result\?\.errors;/);
+  const errorBlock = course.slice(
+    course.indexOf("const errorDetails"),
+    course.indexOf("status.replaceChildren(...children)"),
+  );
+  assert.ok(errorBlock.length > 0);
+  assert.doesNotMatch(errorBlock, /:\s*null/);
+  assert.match(course, /status\.replaceChildren\(\.\.\.children\);/);
+});
+
+test("chart labels are not outlined by the chart-grid layout container", async () => {
+  const charts = await readFile(resolve(staticDir, "charts.js"), "utf8");
+  const css = await readFile(resolve(staticDir, "styles-v2.css"), "utf8");
+  const baseCss = await readFile(resolve(staticDir, "styles.css"), "utf8");
+
+  assert.match(charts, /class: "chart-grid-lines"/);
+  assert.doesNotMatch(charts, /class: "chart-grid"/);
+  assert.match(css, /\.chart-grid-lines\s*\{[^}]*stroke:\s*var\(--line\)/s);
+  assert.match(css, /\.chart-label\s*\{[^}]*stroke:\s*none/s);
+  assert.match(css, /\.chart-value\s*\{[^}]*stroke:\s*none/s);
+  assert.match(baseCss, /\.chart-grid-lines\s*\{[^}]*stroke:\s*var\(--line\)/s);
+});
+
+test("coverage groups concepts as covered or low coverage without marks or extra statuses", async () => {
+  const analysis = await readFile(resolve(staticDir, "views/analysis.js"), "utf8");
+  const start = analysis.indexOf("function renderCoverageReport");
+  const end = analysis.indexOf("// -- distribution", start);
+  const block = analysis.slice(start, end);
+  assert.match(block, /Coverage by unit/);
+  assert.match(block, /Low coverage/);
+  assert.match(block, /Question mappings/);
+  assert.match(block, /safeArray\(report\.question_assignments\)/);
+  assert.match(block, /barChart\(/);
+  assert.doesNotMatch(block, /stackedBar\(/);
+  assert.doesNotMatch(block, /\bUnmapped\b|\bUncertain\b|\bInsufficient\b/i);
+  assert.doesNotMatch(block, /Known marks|Mapped marks|Missing marks|marks/i);
+});
+
+test("evolution uses dated windows and readable change explanations", async () => {
+  const analysis = await readFile(resolve(staticDir, "views/analysis.js"), "utf8");
+  assert.match(analysis, /function changeSideSummary/);
+  const start = analysis.indexOf("function renderEvolutionReport");
+  const block = analysis.slice(start);
+  assert.match(block, /Earlier window/);
+  assert.match(block, /Later window/);
+  assert.doesNotMatch(block, /row\.earlier\.document_title/);
+  assert.doesNotMatch(block, /row\.later\.document_title/);
+});
+
+test("the marks panel reports coverage when no stated allocations exist", async () => {
+  const analysis = await readFile(resolve(staticDir, "views/analysis.js"), "utf8");
+  assert.match(analysis, /const hasAllocations = allocations\.length > 0;/);
+  assert.match(analysis, /Marks data coverage/);
+  assert.match(analysis, /Marks not stated/);
+  assert.match(analysis, /no marks are inferred/);
+  assert.match(analysis, /valueFormat: \(value\) => formatInteger\(value\)/);
+});
+
+test("the generated learning path is mounted outside the concept-detail column", async () => {
+  const learning = await readFile(resolve(staticDir, "views/learning.js"), "utf8");
+  const css = await readFile(resolve(staticDir, "styles-v2.css"), "utf8");
+
+  assert.match(learning, /const pathResultHost = h\("div", \{ class: "path-result-host path-result-wide"/);
+  assert.match(learning, /wrap\.append\(pathResultHost\);/);
+  assert.match(learning, /renderConceptDetail\(ctx, graph, concept, neighborhood, pathResultHost\)/);
+  assert.match(css, /\.path-result-wide\s*\{[^}]*width:\s*100%/s);
+});

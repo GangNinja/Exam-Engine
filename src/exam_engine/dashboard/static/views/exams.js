@@ -1,6 +1,8 @@
 import { h, icon } from "../dom.js";
 import { barChart, lineChart } from "../charts.js";
 import { formatInteger, formatPercent, humaniseCode, safeArray } from "../ui-state.js";
+import { groupQuestionsByPassage } from "./passage-groups.js";
+import { renderOptionContent, renderQuestionContent } from "./question-content.js";
 import {
   dataTable,
   disclaimer,
@@ -29,6 +31,7 @@ export function renderExams(ctx, { mode = "explore", query = new URLSearchParams
     answer_type: clean(query.get("answer_type")),
     unit_id: clean(query.get("unit_id")),
     topic: clean(query.get("topic")),
+    question_id: clean(query.get("question_id")),
     search: clean(query.get("search")),
   };
   const state = {
@@ -233,7 +236,14 @@ export function renderExams(ctx, { mode = "explore", query = new URLSearchParams
       state.overview = overview;
       state.filters = filters;
       state.filterData = overview.filters;
-      fillFilters(overview.filters, initial ? initialFilters : {});
+      fillFilters(overview.filters, initial ? initialFilters : filters);
+      if (!initial && filters.unit_id) {
+        const unitNode = unitSelect.node;
+        if ([...unitNode.options].some((option) => option.value === filters.unit_id)) {
+          unitNode.value = filters.unit_id;
+          fillTopics(filters.unit_id, filters.topic || "");
+        }
+      }
       updateFilterCount();
       summaryHost.replaceChildren(renderSummary(overview.summary, filters));
       if (initial && initialFilters.course) {
@@ -499,7 +509,6 @@ export function renderExams(ctx, { mode = "explore", query = new URLSearchParams
                 {
                   title: "Questions by format",
                   description: "Unknown formats are not guessed.",
-                  limit: 8,
                   valueFormat: (value) => formatInteger(value),
                 },
               )
@@ -597,7 +606,7 @@ export function renderExams(ctx, { mode = "explore", query = new URLSearchParams
           ? h(
               "div",
               { class: "question-list" },
-              ...questions.map((item) => questionCard(item)),
+              ...renderQuestionNodes(questions),
             )
           : emptyState({
               title: "No questions match",
@@ -639,7 +648,7 @@ export function renderExams(ctx, { mode = "explore", query = new URLSearchParams
             const newRows = safeArray(payload.questions);
             state.questions.push(...newRows);
             const list = viewRootQuestionList();
-            for (const item of newRows) list?.append(questionCard(item));
+            list?.replaceChildren(...renderQuestionNodes(state.questions));
             state.questionTotal = Number(payload.total || state.questionTotal);
             updateQuestionCount();
             drawLoadMore(host);
@@ -682,6 +691,7 @@ export function renderExams(ctx, { mode = "explore", query = new URLSearchParams
 
   function drawPapers(papers, total) {
     const wrap = h("div", { class: "view-stack" });
+    const truncated = papers.length < total;
     wrap.append(
       panel(
         "Stored source papers",
@@ -691,7 +701,9 @@ export function renderExams(ctx, { mode = "explore", query = new URLSearchParams
         },
         papers.length
           ? dataTable({
-              caption: `${formatInteger(total)} papers in this view`,
+              caption: truncated
+                ? `${formatInteger(papers.length)} of ${formatInteger(total)} paper groups shown`
+                : `${formatInteger(total)} paper groups in this view`,
               columns: [
                 { label: "Year", key: "exam_year", className: "numeric" },
                 { label: "Category", render: (row) => humaniseCode(row.category_id) },
@@ -717,6 +729,13 @@ export function renderExams(ctx, { mode = "explore", query = new URLSearchParams
               iconName: "analysis",
             }),
       ),
+      truncated
+        ? h(
+            "p",
+            { class: "truncation-note", role: "status" },
+            `Showing the first ${formatInteger(papers.length)} of ${formatInteger(total)} paper groups. Use the filters to narrow this view; the API supports up to 1,000 paper groups per request.`,
+          )
+        : null,
       disclaimer(
         "Paper groups are derived from the source question identifiers. They are not a complete examination calendar and do not imply that every source paper was supplied.",
       ),
@@ -725,17 +744,83 @@ export function renderExams(ctx, { mode = "explore", query = new URLSearchParams
   }
 }
 
-function questionCard(item) {
+function renderQuestionNodes(questions) {
+  return groupQuestionsByPassage(questions).map((group) =>
+    group.passage ? passageGroupCard(group) : questionCard(group.questions[0]),
+  );
+}
+
+function passageGroupCard(group) {
+  const passage = group.passage || {};
+  const questions = safeArray(group.questions);
+  const expected = Number(
+    passage.question_count || safeArray(passage.child_question_ids).length || questions.length,
+  );
+  return h(
+    "section",
+    {
+      class: "passage-group",
+      id: `passage-${passage.passage_id || "unknown"}`,
+      "data-passage-id": passage.passage_id || null,
+    },
+    h(
+      "header",
+      { class: "passage-head" },
+      h(
+        "div",
+        { class: "question-tags" },
+        h("span", { class: "question-tag passage-tag", text: "Passage" }),
+        passage.source_reference
+          ? h("span", { class: "question-tag", text: passage.source_reference })
+          : null,
+        h("span", { class: "source-id", text: passage.passage_id || "passage id not recorded" }),
+      ),
+      h("span", {
+        class: "passage-question-count",
+        text: `${formatInteger(questions.length)}${expected ? ` of ${formatInteger(expected)}` : ""} associated ${questions.length === 1 ? "question" : "questions"}`,
+      }),
+    ),
+    h(
+      "div",
+      { class: "passage-context" },
+      h("p", { class: "passage-text", text: passage.text || "No passage text was stored for this record." }),
+      passage.source_file
+        ? h("p", { class: "passage-source", text: `Source file: ${passage.source_file}` })
+        : null,
+    ),
+    h(
+      "div",
+      { class: "passage-question-list" },
+      ...questions.map((item) => questionCard(item, { inPassage: true })),
+    ),
+    expected > questions.length
+      ? h("p", {
+          class: "question-gap passage-partial-note",
+          text: `${formatInteger(expected - questions.length)} associated question(s) are not in this loaded page; load more records to complete the group.`,
+        })
+      : null,
+  );
+}
+
+function questionCard(item, { inPassage = false } = {}) {
   const text = String(item.text || "").trim();
   const answer = item.answer;
   const options = safeArray(item.options);
+  const subparts = safeArray(item.subparts);
   const correctKey = answer?.correct_option_key || null;
   const preview = compact(text, 300);
   const source = item.source_question_id || item.question_id || "source id not recorded";
   const detailLabel = answer ? "Read full question & answer" : "Read full question";
+  const detailHint = subparts.length
+    ? `${subparts.length} ${subparts.length === 1 ? "subpart" : "subparts"}`
+    : `${options.length} ${options.length === 1 ? "option" : "options"}`;
   return h(
     "article",
-    { class: "question-card" },
+    {
+      class: "question-card",
+      id: `question-${item.question_id}`,
+      "data-passage-id": item.passage_id || null,
+    },
     h(
       "header",
       { class: "question-card-head" },
@@ -749,6 +834,9 @@ function questionCard(item) {
         item.subject_code ? h("span", { class: "question-tag", text: item.subject_code }) : null,
         item.question_type
           ? h("span", { class: "question-tag", text: humaniseCode(item.question_type) })
+          : null,
+        inPassage
+          ? h("span", { class: "question-tag passage-question-tag", text: "Passage question" })
           : null,
       ),
       h(
@@ -770,12 +858,24 @@ function questionCard(item) {
           "summary",
           {},
           h("span", { text: detailLabel }),
-          h("span", { class: "summary-hint", text: `${options.length} ${options.length === 1 ? "option" : "options"}` }),
+          h("span", { class: "summary-hint", text: detailHint }),
         ),
         h(
           "div",
           { class: "question-full" },
-          h("p", { class: "question-text", text: text || "No question text was stored." }),
+          renderQuestionContent(text || "No question text was stored."),
+          subparts.length
+            ? h(
+                "section",
+                { class: "subpart-block" },
+                h("h4", { text: item.question_type === "passage_based" ? "Passage subparts" : "Recorded subparts" }),
+                h(
+                  "ol",
+                  { class: "subpart-list", "aria-label": "Recorded source subparts" },
+                  ...subparts.map((part) => h("li", { class: "subpart-text", text: String(part) })),
+                ),
+              )
+            : null,
           options.length
             ? h(
                 "ol",
@@ -785,12 +885,18 @@ function questionCard(item) {
                     "li",
                     { class: `option-row ${option.key === correctKey ? "is-correct" : ""}`.trim() },
                     h("span", { class: "option-key", text: option.key || "—" }),
-                    h("span", { class: "option-text", text: option.text || "Option text not recorded" }),
+                    h(
+                      "span",
+                      { class: "option-text" },
+                      renderOptionContent(option.text || "Option text not recorded"),
+                    ),
                     option.key === correctKey ? statusBadge("Answer key", "positive") : null,
                   ),
                 ),
               )
-            : h("p", { class: "question-gap", text: "No structured options were supplied for this record." }),
+            : subparts.length
+              ? null
+              : h("p", { class: "question-gap", text: "No structured options were supplied for this record." }),
           h(
             "section",
             { class: "answer-block" },

@@ -35,8 +35,10 @@ from exam_engine.config import GenerationSettings
 from exam_engine.generation.templates import (
     DEFAULT_MARKS,
     MODEL_ONLY_FORMATS,
+    Template,
     needs_of,
     template_for,
+    templates_for,
 )
 from exam_engine.models.enums import BloomLevel, GenerationFormat
 from exam_engine.models.generation import (
@@ -149,6 +151,161 @@ def _answer_aspects(label: str) -> list[str]:
     return parts or [label.strip(" .,;:")]
 
 
+_UNIT_REFERENCE_RE = re.compile(
+    r"\bUnit\s+(?:Marks\s+)?(?:[0-9]+|[IVXLCDM]+)\b(?:\s*\([^)]*\))?\s*[:.\-\u2013\u2014]?\s*",
+    re.IGNORECASE,
+)
+
+
+def _clean_source_text(text: str) -> str:
+    """Clean extraction artefacts and learner-irrelevant unit headings."""
+    cleaned = "".join(
+        " "
+        if ord(character) == 0xFFFD
+        or 0xE000 <= ord(character) <= 0xF8FF
+        or ord(character) < 32
+        else character
+        for character in text
+    )
+    cleaned = _UNIT_REFERENCE_RE.sub(" ", cleaned)
+    return " ".join(cleaned.split()).strip(" .,;:…").strip(" .,;:…")
+
+
+def _answer_points(label: str, excerpt: str) -> list[str]:
+    """Extract concrete neighbouring topics when the source is a topic list."""
+    # A single explanatory sentence should be quoted or paraphrased, not split into
+    # a pseudo-list of unrelated fragments.  Semicolon-separated syllabus rows are
+    # the case where neighbouring topics genuinely help a learner.
+    if excerpt.count(";") < 2:
+        return []
+    pieces = re.split(r";|\n", excerpt)
+    points: list[str] = []
+    expected = _normalised_label(label)
+    for raw in pieces:
+        point = _clean_source_text(raw)
+        point = re.sub(r"^(?:and|or)\s+", "", point, flags=re.IGNORECASE)
+        if len(point) < 4:
+            continue
+        lowered = point.casefold()
+        if any(
+            marker in lowered
+            for marker in ("page ", "marks", "cbseacademic", "pdf", "total:")
+        ):
+            continue
+        normalised_point = _normalised_label(point)
+        if normalised_point == expected:
+            continue
+        # Drop a repeated label at the start while keeping its explanatory tail:
+        # "Aerothermodynamics ...: thrust, efficiency" becomes "thrust, efficiency".
+        if expected and normalised_point.startswith(expected):
+            point = point[len(label) :].lstrip(" :.\u2013\u2014(\"'-").strip()
+            normalised_point = _normalised_label(point)
+            if len(point) < 4 or normalised_point == expected:
+                continue
+        elif expected and (
+            expected in normalised_point
+            or (normalised_point in expected and len(normalised_point.split()) >= 3)
+        ):
+            # A phrase that merely repeats part of the topic label adds no detail.
+            continue
+        if re.search(r"\b\d+\b", point) and len(point.split()) <= 5:
+            # Marks/page/unit rows from a syllabus table are not answer ideas.
+            continue
+        if normalised_point in {_normalised_label(item) for item in points}:
+            continue
+        points.append(point)
+    return points[:5]
+
+
+def _aspect_summary(aspects: Sequence[str]) -> str:
+    """A readable, bounded phrase for the evidence points in a topic label."""
+    unique = [item for item in aspects if item]
+    shown = unique[:6]
+    summary = "; ".join(shown)
+    if len(unique) > len(shown):
+        summary += "; …"
+    return summary
+
+
+def _answer_steps(label: str, aspects: Sequence[str]) -> list[str]:
+    """A short, useful answer outline instead of one word per label fragment."""
+    summary = _aspect_summary(aspects)
+    if not summary or _normalised_label(summary) == _normalised_label(label):
+        middle = "Explain the key ideas behind it and how they relate."
+    else:
+        middle = f"Explain the key ideas: {summary}."
+    return [
+        f"Define {label} in one clear sentence.",
+        middle,
+        "Connect the ideas and support the answer with one course-grounded example.",
+    ]
+
+
+def _answer_quote(label: str, excerpt: str) -> str | None:
+    """A short, relevant verbatim anchor for the answer key, if one exists."""
+    cleaned = _clean_source_text(excerpt)
+    cleaned_label = _clean_source_text(label)
+    if len(cleaned_label) >= 12 and re.search(
+        rf"(?<!\w){re.escape(cleaned_label)}(?!\w)", cleaned, re.IGNORECASE
+    ):
+        return f'"{cleaned_label}"'
+    # A topic-list passage is still relevant even when the label is inflected.
+    # A single unrelated sentence is not: saying "Syllabus entry: ..." next to a
+    # different sentence makes the answer look wrong, so omit the anchor instead.
+    if excerpt.count(";") >= 2:
+        anchor = cleaned[:120].rsplit(" ", 1)[0].rstrip() if len(cleaned) > 120 else cleaned
+        if len(anchor) >= 12:
+            return f'"{anchor}"'
+    return None
+
+
+def _excerpt_answer(
+    label: str,
+    excerpt: str,
+    aspects: Sequence[str],
+    *,
+    label_only: bool,
+) -> str:
+    """A readable answer built only from the stored source passage."""
+    points = _answer_points(label, excerpt)
+    summary = _aspect_summary(points)
+    quote = _answer_quote(label, excerpt)
+    source_note = f" Syllabus entry: {quote}." if quote else ""
+    if label_only:
+        coverage = f" A complete answer should cover: {summary}." if summary else (
+            " A complete answer should define the topic and add detail from the course notes."
+        )
+        return (
+            f"The course material names {label} as a syllabus topic but does not "
+            f"provide a definition.{coverage}{source_note}"
+        )
+    if points and summary:
+        return (
+            f"The course material groups {label} with these syllabus ideas: {summary}. "
+            "A complete answer should define the topic, explain how these ideas relate, "
+            f"and support the explanation with one example.{source_note}"
+        )
+    return (
+        f"The course material lists {label} as a syllabus topic. A complete answer "
+        "should define the topic and explain its role using the course notes."
+        f"{source_note}"
+    )
+
+
+def _outline_answer(label: str, excerpt: str, aspects: Sequence[str]) -> str:
+    """A transparent outline for open-ended tasks, with its grounding evidence."""
+    points = _answer_points(label, excerpt)
+    summary = _aspect_summary(points)
+    focus = summary or "the ideas shown in the course material"
+    quote = _answer_quote(label, excerpt)
+    source_note = f" The syllabus entry is {quote}." if quote else ""
+    return (
+        f"Reference outline for {label}.{source_note} Start with a clear definition, "
+        f"then explain {focus}. Connect the ideas and close with one course-grounded "
+        "example. This is a review outline, not a single model answer."
+    )
+
+
 #: Placeholder put where the tested concept's name was removed from a stem.
 MASK = "_____"
 
@@ -249,7 +406,14 @@ class TemplateProvider:
     # -- helpers -----------------------------------------------------------
 
     def _passage(self, prompt: GenerationPrompt) -> SourcePassage | None:
-        return prompt.passages[0] if prompt.passages else None
+        if not prompt.passages:
+            return None
+        if prompt.format is GenerationFormat.CASE_BASED:
+            # Case tasks need context, not the shortest sentence that happens to
+            # mention the label.  Prefer the richest grounded excerpt available.
+            candidates = [*prompt.passages, *prompt.related_passages]
+            return max(candidates, key=lambda passage: len(passage.excerpt))
+        return prompt.passages[0]
 
     def _mcq_passage(self, prompt: GenerationPrompt) -> SourcePassage | None:
         """Prefer the statement that names the fewest of the offered sibling concepts.
@@ -267,7 +431,12 @@ class TemplateProvider:
             masked = self._masked_statement(prompt, passage.excerpt)
             if masked is None:
                 continue
-            foreign = sum(1 for label in prompt.related_labels if _mentions(masked, label))
+            # Count siblings in the original excerpt.  The masked statement hides
+            # them on purpose, so counting the masked form would make every passage
+            # look equally clean and defeat this preference.
+            foreign = sum(
+                1 for label in prompt.related_labels if _mentions(passage.excerpt, label)
+            )
             if best is None or (foreign, position) < best[:2]:
                 best = (foreign, position, passage)
         return best[2] if best is not None else prompt.passages[0]
@@ -294,30 +463,43 @@ class TemplateProvider:
         return _strip_masked_heading(masked) or masked
 
     def _context(self, prompt: GenerationPrompt, passage: SourcePassage) -> dict[str, str]:
-        masked = self._masked_statement(prompt, passage.excerpt)
+        excerpt = _clean_source_text(passage.excerpt)
+        masked = self._masked_statement(prompt, excerpt)
         return {
             "concept": prompt.concept_label,
-            "unit": prompt.unit_label,
-            "source": passage.document_title,
-            "excerpt": passage.excerpt,
-            "masked": masked if masked is not None else passage.excerpt,
+            # The unit is stored on the question and in provenance.  It is not
+            # repeated in the learner-facing task statement: unit names made the
+            # generated questions read like syllabus navigation rather than questions.
+            "unit": "this syllabus",
+            "source": _clean_source_text(passage.document_title) or "the course syllabus",
+            "excerpt": excerpt,
+            "masked": masked if masked is not None else excerpt,
             "other": prompt.related_labels[0] if prompt.related_labels else "",
             "objective": prompt.learning_objective,
         }
 
-    def _mcq_options(self, prompt: GenerationPrompt) -> list[GeneratedOption]:
+    def _mcq_options(
+        self, prompt: GenerationPrompt, passage: SourcePassage | None = None
+    ) -> list[GeneratedOption]:
         labels = [prompt.concept_label]
+        related: list[str] = []
         for label in prompt.related_labels:
             normalised = label.casefold()
             if normalised not in {item.casefold() for item in labels}:
-                labels.append(label)
+                related.append(label)
+        if passage is not None:
+            # Prefer alternatives that do not already appear in the stem.  This
+            # keeps a topic-list passage usable as a recognition item without
+            # offering the same topics both in the wording and in the options.
+            related.sort(key=lambda label: _mentions(passage.excerpt, label))
+        labels.extend(related)
         maximum = min(self.settings.max_mcq_options, len(labels))
         if maximum < self.settings.min_mcq_options:
             raise ProviderError(
                 "insufficient_distractors",
                 (
                     f"a {prompt.format.value} question needs at least "
-                    f"{self.settings.min_mcq_options - 1} other concepts in the unit to build "
+                    f"{self.settings.min_mcq_options - 1} other concepts in the course to build "
                     f"plausible options; found {len(labels) - 1}"
                 ),
                 detail={"available": len(labels) - 1},
@@ -335,7 +517,13 @@ class TemplateProvider:
         ]
 
     def generate(self, prompt: GenerationPrompt) -> QuestionDraft:
-        template = template_for(prompt.format, prompt.bloom)
+        candidates = templates_for(prompt.format, prompt.bloom)
+        template: Template | None
+        if len(candidates) > 1 and prompt.seed:
+            rng = random.Random(prompt.seed * 1009 + prompt.index)
+            template = candidates[rng.randrange(len(candidates))]
+        else:
+            template = candidates[0] if candidates else template_for(prompt.format, prompt.bloom)
         if template is None or prompt.format in MODEL_ONLY_FORMATS:
             raise ProviderError(
                 "provider_capability", self.capability_note(prompt.format, prompt.bloom)
@@ -390,7 +578,6 @@ class TemplateProvider:
                 "template_context_missing",
                 f"template {template.template_id} needs context {exc}",
             ) from exc
-
         draft = QuestionDraft(
             text=text,
             template_id=template.template_id,
@@ -405,7 +592,7 @@ class TemplateProvider:
             },
         )
         if prompt.format is GenerationFormat.MULTIPLE_CHOICE:
-            options = self._mcq_options(prompt)
+            options = self._mcq_options(prompt, passage)
             draft.options = [option.text for option in options]
             draft.correct_index = next(
                 position for position, option in enumerate(options) if option.is_correct
@@ -413,7 +600,7 @@ class TemplateProvider:
             draft.answer_key = prompt.concept_label if prompt.include_answer_key else None
             draft.distractor_explanations = {
                 option.key: (
-                    f"{option.text} is a syllabus concept from {prompt.unit_label}, "
+                    f"{option.text} is a syllabus concept from this course, "
                     "but the quoted statement does not describe it."
                 )
                 for option in options
@@ -426,36 +613,32 @@ class TemplateProvider:
             return draft
 
         if template.answer_mode == "excerpt":
-            aspects = _answer_aspects(prompt.concept_label)
+            aspects = _answer_points(prompt.concept_label, passage.excerpt)
             label_only = _is_label_only(passage.excerpt, prompt.concept_label)
-            draft.solution_steps = [f"Cover: {aspect}." for aspect in aspects]
-            if len(aspects) > 1:
-                draft.solution_steps.append(
-                    f"Connect these points to the treatment of {prompt.unit_label}."
-                )
+            draft.solution_steps = _answer_steps(prompt.concept_label, aspects)
             if prompt.include_answer_key:
-                if label_only:
-                    # A syllabus line is a topic, not a definition. Say so instead of
-                    # dressing the same words up as a complete model answer.
-                    draft.answer_key = (
-                        f"The stored course source names this topic but does not provide "
-                        f"a definition. A complete answer should cover: "
-                        f"{'; '.join(aspects)}."
-                    )
-                    draft.metadata["answer_key_status"] = "rubric_only"
-                else:
-                    draft.answer_key = f'Course reference: "{passage.excerpt}"'
-                    draft.metadata["answer_key_status"] = "source_excerpt"
+                draft.answer_key = _excerpt_answer(
+                    prompt.concept_label,
+                    passage.excerpt,
+                    aspects,
+                    label_only=label_only,
+                )
+                draft.metadata["answer_key_status"] = (
+                    "rubric_only"
+                    if label_only or _answer_quote(prompt.concept_label, passage.excerpt) is None
+                    else "source_excerpt"
+                )
             if prompt.include_explanation:
                 if label_only:
                     draft.explanation = (
-                        "The only stored evidence for this concept is its syllabus topic. "
-                        "Use the expected-answer outline and add course notes to strengthen "
-                        "the reference material."
+                        "The stored source only names this topic, so this reference "
+                        "outline lists what a complete answer should cover. Add course "
+                        "notes for a fuller model answer."
                     )
                 else:
                     draft.explanation = (
-                        f'The course material for {prompt.unit_label} states: "{passage.excerpt}"'
+                        "This reference answer paraphrases the stored course material. "
+                        "It is a grounding outline, not a complete model answer."
                     )
             return draft
 
@@ -473,21 +656,44 @@ class TemplateProvider:
                     "insufficient_evidence",
                     "comparison answers need a grounding passage for the second concept too",
                 )
+            other_label = prompt.related_labels[0] if prompt.related_labels else "the related concept"
             if prompt.include_answer_key:
                 draft.answer_key = (
-                    f'Reference material: {passage.document_title} - "{passage.excerpt}"; '
-                    f'{other.document_title} - "{other.excerpt}"'
+                    f"Reference material: Compare {prompt.concept_label} with {other_label}. "
+                    f'Course material for {prompt.concept_label}: '
+                    f'"{_clean_source_text(passage.excerpt)}" '
+                    f'Course material for {other_label}: '
+                    f'"{_clean_source_text(other.excerpt)}" '
+                    "State at least one similarity, one difference, and why the "
+                    "difference matters for the task."
                 )
             if prompt.include_explanation:
                 draft.explanation = (
-                    "Both reference excerpts are quoted from the course material; the "
-                    "comparison itself is the student's task."
+                    "Both excerpts are quoted from the course material. The comparison "
+                    "itself is the student's task; the answer key identifies the evidence "
+                    "to compare."
                 )
             return draft
 
-        # Open-ended task: no reference answer can be derived from the source
-        # without reasoning, so none is invented.
-        draft.metadata["answer_key_status"] = "not_provided_by_template_provider"
+        # Open-ended task: provide a reviewable reference outline rather than a
+        # single invented model answer.  Every outline point comes from the concept
+        # label and the quoted evidence, so the student can see what a complete
+        # answer should cover.
+        aspects = _answer_points(prompt.concept_label, passage.excerpt)
+        draft.solution_steps = _answer_steps(prompt.concept_label, aspects)
+        if prompt.include_answer_key:
+            draft.answer_key = _outline_answer(
+                prompt.concept_label,
+                passage.excerpt,
+                aspects,
+            )
+        draft.metadata["answer_key_status"] = "reference_outline"
+        if prompt.include_explanation:
+            draft.explanation = (
+                "This is a reference outline grounded in the stored course material. "
+                "The task is open-ended, so the outline identifies what a complete "
+                "answer should cover rather than prescribing one answer."
+            )
         return draft
 
 

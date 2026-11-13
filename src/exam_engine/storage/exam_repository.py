@@ -9,12 +9,23 @@ from typing import Any
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
+from exam_engine.models.enums import ExtractionMethod
+from exam_engine.models.provenance import (
+    IdentityStatus,
+    ProvenanceRecord,
+    ProvenanceScope,
+    SourceClassification,
+)
 from exam_engine.storage.schema import (
+    CourseRow,
+    DatasetSourceRow,
     DocumentRow,
     ExamAnswerRow,
     ExamImportFileRow,
     ExamImportRunRow,
     ExamPaperRow,
+    ExamPassageRow,
+    ExamProvenanceRow,
     ExamQuestionDetailRow,
     QuestionRow,
     SyllabusRow,
@@ -26,9 +37,148 @@ def _iso(value: datetime) -> str:
     return value.astimezone(UTC).isoformat()
 
 
+def _provenance_row(record: ProvenanceRecord) -> ExamProvenanceRow:
+    """Map one validated provenance record onto its storage row."""
+    return ExamProvenanceRow(
+        provenance_id=record.provenance_id,
+        scope=record.scope.value,
+        course_id=record.course_id,
+        document_id=record.document_id,
+        paper_id=record.paper_id,
+        question_id=record.question_id,
+        answer_id=record.answer_id,
+        source_id=record.source_id,
+        source_url=record.source_url,
+        source_publisher=record.source_publisher,
+        retrieved_at=record.retrieved_at.isoformat() if record.retrieved_at else None,
+        source_document_sha256=record.source_document_sha256,
+        examining_authority=record.examining_authority,
+        examination_name=record.examination_name,
+        exam_year=record.exam_year,
+        exam_session=record.exam_session,
+        subject_code=record.subject_code,
+        paper_code=record.paper_code,
+        set_code=record.set_code,
+        region=record.region,
+        language=record.language,
+        original_question_id=record.original_question_id,
+        original_option_ids_json=json.dumps(list(record.original_option_ids), ensure_ascii=False),
+        original_question_number=record.original_question_number,
+        extraction_method=(
+            record.extraction_method.value if record.extraction_method is not None else None
+        ),
+        extraction_confidence=record.extraction_confidence,
+        source_classification=record.source_classification.value,
+        identity_status=record.identity_status.value,
+        paper_identity_status=record.paper_identity_status.value,
+        key_identity_status=record.key_identity_status.value,
+        notes=record.notes,
+        evidence_json=json.dumps(record.evidence, ensure_ascii=False, default=str),
+        created_at=_iso(record.created_at),
+    )
+
+
 class ExamDatasetRepository:
     def __init__(self, session: Session) -> None:
         self.session = session
+
+    # -- passage context ---------------------------------------------------
+    def upsert_passages(self, passages: list[Any]) -> dict[str, Any]:
+        """Upsert the source passage sidecar and link matching question details.
+
+        A child id that does not resolve is reported and left unlinked; it is
+        never guessed from a similar question id or a paper label.
+        """
+        linked = 0
+        missing: list[dict[str, str]] = []
+        now = _iso(datetime.now(UTC))
+        for passage in passages:
+            course = self.session.get(CourseRow, passage.course_id)
+            if course is None:
+                for child_id in passage.child_question_ids:
+                    missing.append(
+                        {
+                            "passage_id": passage.passage_id,
+                            "question_id": child_id,
+                            "reason": "unknown_course",
+                        }
+                    )
+                continue
+            details = self.session.scalars(
+                select(ExamQuestionDetailRow).where(
+                    ExamQuestionDetailRow.course_id == passage.course_id,
+                    ExamQuestionDetailRow.source_question_id.in_(passage.child_question_ids),
+                )
+            ).all()
+            by_source = {detail.source_question_id: detail for detail in details}
+            for child_id in passage.child_question_ids:
+                if child_id not in by_source:
+                    missing.append(
+                        {
+                            "passage_id": passage.passage_id,
+                            "question_id": child_id,
+                            "reason": "missing_question_detail",
+                        }
+                    )
+            ordered = sorted(
+                by_source.values(),
+                key=lambda detail: (
+                    detail.source_row is None,
+                    detail.source_row or 0,
+                    detail.source_question_id,
+                ),
+            )
+            row = self.session.get(ExamPassageRow, passage.passage_id)
+            if row is None:
+                row = ExamPassageRow(
+                    passage_id=passage.passage_id,
+                    course_id=passage.course_id,
+                    passage_text=passage.passage_text,
+                    source_reference=passage.source_reference,
+                    source_file=passage.source_file,
+                    child_question_ids_json=json.dumps(
+                        list(passage.child_question_ids), ensure_ascii=False
+                    ),
+                    confidence=passage.confidence,
+                    created_at=now,
+                )
+                self.session.add(row)
+            else:
+                row.course_id = passage.course_id
+                row.passage_text = passage.passage_text
+                row.source_reference = passage.source_reference
+                row.source_file = passage.source_file
+                row.child_question_ids_json = json.dumps(
+                    list(passage.child_question_ids), ensure_ascii=False
+                )
+                row.confidence = passage.confidence
+            for order, detail in enumerate(ordered, start=1):
+                detail.passage_id = passage.passage_id
+                detail.passage_order = order
+                linked += 1
+        self.session.flush()
+        return {
+            "passages": len(passages),
+            "linked": linked,
+            "missing": missing,
+            "message": f"{linked} question link(s) stored",
+        }
+
+    def update_subparts(self, entries: dict[tuple[str, str], str]) -> int:
+        """Store source subparts for linked passage children only."""
+        updated = 0
+        for (course_id, source_question_id), raw in entries.items():
+            detail = self.session.scalars(
+                select(ExamQuestionDetailRow).where(
+                    ExamQuestionDetailRow.course_id == course_id,
+                    ExamQuestionDetailRow.source_question_id == source_question_id,
+                )
+            ).first()
+            if detail is not None and detail.subparts_json != raw:
+                detail.subparts_json = raw
+                updated += 1
+        self.session.flush()
+        return updated
 
     # -- projection --------------------------------------------------------
     def replace_document_projection(
@@ -58,6 +208,182 @@ class ExamDatasetRepository:
         for answer in answers:
             self.session.add(ExamAnswerRow(**answer))
         self.session.flush()
+
+    # -- provenance --------------------------------------------------------
+    def replace_document_provenance(self, document_id: str) -> int:
+        """Rebuild provenance rows for one imported document.
+
+        Only values present in the source material are written. Local paper
+        labels, source question ids and derived years are recorded inside
+        ``evidence_json`` as local values, never in the official-code columns.
+        """
+        document = self.session.get(DocumentRow, document_id)
+        if document is None:
+            return 0
+        self.session.execute(
+            delete(ExamProvenanceRow).where(ExamProvenanceRow.document_id == document_id)
+        )
+        source = self.session.get(DatasetSourceRow, document.source_id)
+        now = datetime.now(UTC)
+        base_evidence: dict[str, Any] = {
+            "dataset_source_id": document.source_id,
+            "local_relative_path": document.relative_path,
+            "original_filename": document.original_filename,
+            "dataset_source_retrieved_at": (
+                source.retrieved_at if source is not None else None
+            ),
+            "dataset_source_retrieved_at_meaning": (
+                "date recorded by the Phase 13 import; not the document acquisition date"
+            ),
+            "identity_basis": (
+                "local corpus only; no official paper, booklet, set or key identity "
+                "evidence is attached to this row"
+            ),
+        }
+        extraction_method = (
+            ExtractionMethod.STRUCTURED if document.format == "csv" else None
+        )
+        records: list[ProvenanceRecord] = [
+            ProvenanceRecord.build(
+                scope=ProvenanceScope.DOCUMENT,
+                course_id=document.course_id,
+                document_id=document_id,
+                created_at=now,
+                source_id=document.source_id,
+                source_publisher=source.publisher if source is not None else None,
+                source_document_sha256=document.content_sha256,
+                extraction_method=extraction_method,
+                notes=(
+                    "local imported document; source URL, examining authority, paper code "
+                    "and retrieval date were not recorded and remain unknown"
+                ),
+                evidence=base_evidence,
+            )
+        ]
+
+        for paper in self.session.scalars(
+            select(ExamPaperRow)
+            .where(ExamPaperRow.document_id == document_id)
+            .order_by(ExamPaperRow.paper_label)
+        ).all():
+            records.append(
+                ProvenanceRecord.build(
+                    scope=ProvenanceScope.PAPER,
+                    course_id=paper.course_id,
+                    document_id=document_id,
+                    paper_id=paper.paper_id,
+                    created_at=now,
+                    source_id=document.source_id,
+                    source_document_sha256=document.content_sha256,
+                    notes=(
+                        "paper_label is derived from a local compiled question id; it is not "
+                        "an official paper, booklet, set or language code"
+                    ),
+                    evidence={
+                        **base_evidence,
+                        "local_paper_label": paper.paper_label,
+                        "derived_paper_label_from_local_source_id": True,
+                        "local_question_count": paper.question_count,
+                    },
+                )
+            )
+
+        rows = self.session.execute(
+            select(ExamQuestionDetailRow, ExamAnswerRow)
+            .join(QuestionRow, QuestionRow.question_id == ExamQuestionDetailRow.question_id)
+            .outerjoin(
+                ExamAnswerRow,
+                ExamAnswerRow.question_id == ExamQuestionDetailRow.question_id,
+            )
+            .where(QuestionRow.document_id == document_id)
+            .order_by(ExamQuestionDetailRow.source_row, ExamQuestionDetailRow.question_id)
+        ).all()
+        for detail, answer in rows:
+            records.append(
+                ProvenanceRecord.build(
+                    scope=ProvenanceScope.QUESTION,
+                    course_id=detail.course_id,
+                    document_id=document_id,
+                    paper_id=detail.paper_id,
+                    question_id=detail.question_id,
+                    created_at=now,
+                    source_id=document.source_id,
+                    source_document_sha256=document.content_sha256,
+                    original_question_number=detail.original_question_number,
+                    extraction_method=extraction_method,
+                    notes=(
+                        "question text comes from the local compiled corpus; no exact "
+                        "official wording/option identity has been established"
+                    ),
+                    evidence={
+                        **base_evidence,
+                        "local_source_question_id": detail.source_question_id,
+                        "local_source_question_id_is_official": False,
+                        "local_source_row": detail.source_row,
+                        "local_question_type": detail.question_type,
+                        "local_paper_id": detail.paper_id,
+                    },
+                )
+            )
+            if answer is None:
+                continue
+            records.append(
+                ProvenanceRecord.build(
+                    scope=ProvenanceScope.ANSWER,
+                    course_id=answer.course_id,
+                    document_id=document_id,
+                    paper_id=detail.paper_id,
+                    question_id=detail.question_id,
+                    answer_id=answer.answer_id,
+                    created_at=now,
+                    source_id=document.source_id,
+                    source_document_sha256=document.content_sha256,
+                    extraction_method=extraction_method,
+                    identity_status=IdentityStatus.UNRESOLVED,
+                    key_identity_status=IdentityStatus.UNRESOLVED,
+                    source_classification=SourceClassification.UNKNOWN,
+                    notes=(
+                        "answer text is paired from the same local CSV row; no independent "
+                        "verification and no official final-key mapping is implied"
+                    ),
+                    evidence={
+                        **base_evidence,
+                        "local_source_answer_id": answer.source_answer_id,
+                        "local_match_method": answer.match_method,
+                        "local_match_confidence": answer.confidence,
+                        "local_answer_type": answer.answer_type,
+                        "local_paper_id": detail.paper_id,
+                    },
+                )
+            )
+
+        for record in records:
+            self.session.add(_provenance_row(record))
+        self.session.flush()
+        return len(records)
+
+    def add_provenance(self, records: list[ProvenanceRecord]) -> int:
+        """Upsert explicit provenance records supplied by a future importer."""
+        for record in records:
+            self.session.merge(_provenance_row(record))
+        self.session.flush()
+        return len(records)
+
+    def provenance_counts(self) -> dict[str, Any]:
+        def grouped(column: Any) -> dict[str, int]:
+            rows = self.session.execute(select(column, func.count()).group_by(column)).all()
+            return {str(value): int(count) for value, count in rows}
+
+        return {
+            "total": int(
+                self.session.scalar(select(func.count()).select_from(ExamProvenanceRow)) or 0
+            ),
+            "by_scope": grouped(ExamProvenanceRow.scope),
+            "by_source_classification": grouped(ExamProvenanceRow.source_classification),
+            "by_identity_status": grouped(ExamProvenanceRow.identity_status),
+            "by_paper_identity_status": grouped(ExamProvenanceRow.paper_identity_status),
+            "by_key_identity_status": grouped(ExamProvenanceRow.key_identity_status),
+        }
 
     def paper_counts(self, course_id: str) -> dict[str, int]:
         rows = self.session.execute(

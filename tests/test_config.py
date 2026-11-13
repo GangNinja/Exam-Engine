@@ -59,6 +59,8 @@ def test_analytics_env_overrides() -> None:
     assert settings.analytics.max_questions == 40
     assert settings.analytics.small_sample_questions == 3
     assert settings.analytics.low_confidence_threshold == 0.65
+    assert settings.analytics.difficulty_easy_below == 0.32
+    assert settings.analytics.difficulty_hard_above == 0.60
     assert settings.analytics.similarity_threshold == 0.0
     assert settings.analytics.priority_frequency_weight == 0.4
 

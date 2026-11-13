@@ -5,7 +5,13 @@ from pathlib import Path
 
 from exam_engine.config import NlpSettings, Settings
 from exam_engine.ingest.pipeline import IngestionPipeline
-from exam_engine.models.enums import ConceptOrigin, DocumentKind, NlpStatus, TextOwnerType
+from exam_engine.models.enums import (
+    ConceptOrigin,
+    DocumentKind,
+    NlpStatus,
+    Severity,
+    TextOwnerType,
+)
 from exam_engine.models.nlp import NlpRunReport
 from exam_engine.nlp.service import NlpService
 from exam_engine.storage.nlp_repositories import (
@@ -69,10 +75,14 @@ TEXTS = {
 
 def test_analysis_produces_persisted_derived_data(database, tmp_path: Path) -> None:
     seed(database, tmp_path, "course-a", TEXTS, kinds={"syllabus": DocumentKind.SYLLABUS})
-    service = NlpService(database, HASHING)
+    service = NlpService(database, replace(HASHING, topics_k=2))
     report = service.analyze_course("course-a")
 
-    assert report.status in (NlpStatus.OK, NlpStatus.PARTIAL)
+    assert report.status is NlpStatus.OK, [
+        (warning.code, warning.severity.value, warning.message) for warning in report.warnings
+    ]
+    assert report.errors == []
+    assert any(warning.severity is Severity.INFO for warning in report.warnings)
     assert report.totals["texts"] > 0
     assert report.totals["keyphrases"] > 0
     assert report.totals["entities"] > 0
@@ -234,11 +244,39 @@ def test_two_documents_fall_back_to_section_topics(database, tmp_path: Path) -> 
             "sorting": TEXTS["sorting"],
         },
     )
-    report = NlpService(database, HASHING).analyze_course("course-small")
+    report = NlpService(database, replace(HASHING, topics_k=1)).analyze_course("course-small")
     with database.session() as session:
-        topics = TopicRepository(session).list_by_course("course-small")
+        topics = TopicRepository(session).list_by_course(
+            "course-small"
+        )  # The two documents trigger the documented fallback, but topic discovery still
+    # reports a warning-level shortfall, so this run is legitimately partial.
+    assert report.status is NlpStatus.PARTIAL
     assert any(topic.scope is TextOwnerType.SECTION for topic in topics) or not topics
-    assert any("sections" in warning.message for warning in report.warnings)
+    assert any(
+        warning.code == "insufficient_data"
+        and warning.severity is Severity.INFO
+        and "sections" in warning.message
+        for warning in report.warnings
+    )
+    assert any(
+        warning.code == "insufficient_data"
+        and warning.severity is Severity.WARNING
+        and "at least 3" in warning.message
+        for warning in report.warnings
+    )
+
+
+def test_warning_severity_still_marks_run_partial(database, tmp_path: Path) -> None:
+    seed(database, tmp_path, "course-a", TEXTS)
+    service = NlpService(database, replace(HASHING, keyword_method="not-a-method", topics_k=2))
+    report = service.analyze_course("course-a")
+
+    assert report.status is NlpStatus.PARTIAL
+    assert any(
+        warning.code == "model_unavailable" and warning.severity is Severity.WARNING
+        for warning in report.warnings
+    )
+    assert report.totals["keyphrases"] > 0
 
 
 def test_reset_removes_derived_rows_only(database, tmp_path: Path) -> None:

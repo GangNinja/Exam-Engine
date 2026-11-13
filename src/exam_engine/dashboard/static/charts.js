@@ -4,7 +4,7 @@
  * There is no charting library and no generated or placeholder series.
  */
 import { h, svg, fragment } from "./dom.js";
-import { barData, formatNumber, formatPercent, segmentData, titleCase } from "./ui-state.js";
+import { barSeries, formatNumber, formatPercent, segmentData, titleCase } from "./ui-state.js";
 
 let chartId = 0;
 
@@ -17,8 +17,13 @@ export function barChart(items, options = {}) {
     limit = 30,
     unitLabel = "",
   } = options;
-  const data = barData(items, { limit });
+  const series = barSeries(items, { limit });
+  const data = series.rows;
   if (!data.length) return emptyChart(title, description || "No data is available.");
+  const truncationNote = series.truncated
+    ? `Showing ${series.shown} of ${series.total} categories; the data table lists the shown categories.`
+    : "";
+  const chartDescription = [description, truncationNote].filter(Boolean).join(" ");
   const id = `chart-${++chartId}`;
   const width = 640;
   const rowHeight = 30;
@@ -76,13 +81,13 @@ export function barChart(items, options = {}) {
       "aria-labelledby": `${id}-title ${id}-desc`,
     },
     svg("title", { id: `${id}-title`, text: title }),
-    svg("desc", { id: `${id}-desc`, text: description || "Horizontal bar chart." }),
+    svg("desc", { id: `${id}-desc`, text: chartDescription || "Horizontal bar chart." }),
     ...bars,
   );
 
   return chartFrame({
     title,
-    description,
+    description: chartDescription,
     visual: svgNode,
     columns: ["Label", unitLabel || "Value"],
     rows: data.map((item) => [item.label, valueFormat(item.value)]),
@@ -191,7 +196,7 @@ export function lineChart(points, options = {}) {
         x2: width - padding.right,
         y1: padding.top + plotHeight * ratio,
         y2: padding.top + plotHeight * ratio,
-        class: "chart-grid",
+        class: "chart-grid-lines",
       }),
     ),
     svg("path", { d: path, class: "chart-line" }),

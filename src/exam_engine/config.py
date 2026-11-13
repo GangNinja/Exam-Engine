@@ -85,8 +85,10 @@ class NlpSettings:
 class UnderstandingSettings:
     """Phase 3 question-understanding thresholds and limits.
 
-    All thresholds are deliberately explicit: a candidate below the threshold
-    stays unmapped or unclassified instead of being forced into a label.
+    All thresholds are deliberately explicit. Mapping candidates below the
+    threshold stay unmapped; classification candidates below the threshold get
+    a defined, low-confidence fallback so the dashboard never shows an
+    unclassified bucket.
     """
 
     max_questions: int = 2000
@@ -145,6 +147,10 @@ class AnalyticsSettings:
     max_questions: int = 20000
     small_sample_questions: int = 5
     low_confidence_threshold: float = 0.5
+    # Read-time rescaling for analyses produced before the difficulty band
+    # fallback existed. These mirror the Phase 3 band thresholds.
+    difficulty_easy_below: float = 0.32
+    difficulty_hard_above: float = 0.60
     min_trend_periods: int = 2
     min_period_questions: int = 3
     similarity_threshold: float = 0.0
@@ -161,6 +167,12 @@ class AnalyticsSettings:
             max_questions=_int_env(env, "EXAM_ENGINE_Q4_MAX_QUESTIONS", 20000),
             small_sample_questions=_int_env(env, "EXAM_ENGINE_Q4_SMALL_SAMPLE", 5),
             low_confidence_threshold=_float_env(env, "EXAM_ENGINE_Q4_LOW_CONFIDENCE", 0.5),
+            difficulty_easy_below=_float_env(
+                env, "EXAM_ENGINE_Q3_DIFFICULTY_EASY_BELOW", 0.32
+            ),
+            difficulty_hard_above=_float_env(
+                env, "EXAM_ENGINE_Q3_DIFFICULTY_HARD_ABOVE", 0.60
+            ),
             min_trend_periods=_int_env(env, "EXAM_ENGINE_Q4_MIN_TREND_PERIODS", 2),
             min_period_questions=_int_env(env, "EXAM_ENGINE_Q4_MIN_PERIOD_QUESTIONS", 3),
             similarity_threshold=_zero_to_one_env(env, "EXAM_ENGINE_Q4_SIMILARITY_THRESHOLD", 0.0),
@@ -490,6 +502,42 @@ class AdvancedSettings:
 
 
 @dataclass(frozen=True)
+class TutorSettings:
+    """Phase 12 tutor model and web-retrieval settings.
+
+    The tutor prefers a local Ollama model, so the core AI path does not need a
+    paid API key. An OpenAI-compatible endpoint can be selected explicitly; its
+    credential is read from the environment and never stored in settings.
+    """
+
+    provider: str = "auto"
+    ollama_url: str = "http://127.0.0.1:11434"
+    model: str | None = None
+    llm_base_url: str | None = None
+    timeout_seconds: float = 240.0
+    web_search: str = "auto"
+    max_web_sources: int = 2
+    max_local_concepts: int = 12
+
+    @classmethod
+    def from_env(cls, env: Mapping[str, str] | None = None) -> TutorSettings:
+        env = os.environ if env is None else env
+        return cls(
+            provider=_str_env(env, "EXAM_ENGINE_TUTOR_PROVIDER", "auto"),
+            ollama_url=_str_env(env, "EXAM_ENGINE_TUTOR_OLLAMA_URL", "http://127.0.0.1:11434"),
+            model=(env.get("EXAM_ENGINE_TUTOR_MODEL") or None),
+            llm_base_url=(env.get("EXAM_ENGINE_TUTOR_LLM_BASE_URL") or None),
+            timeout_seconds=_positive_float_env(env, "EXAM_ENGINE_TUTOR_TIMEOUT", 240.0),
+            web_search=_str_env(env, "EXAM_ENGINE_TUTOR_WEB_SEARCH", "auto"),
+            max_web_sources=_int_env(env, "EXAM_ENGINE_TUTOR_WEB_SOURCES", 2),
+            max_local_concepts=_int_env(env, "EXAM_ENGINE_TUTOR_LOCAL_CONCEPTS", 12),
+        )
+
+    def as_config(self) -> dict[str, Any]:
+        return dict(self.__dict__)
+
+
+@dataclass(frozen=True)
 class Settings:
     """Runtime settings resolved from explicit arguments or environment variables."""
 
@@ -506,6 +554,7 @@ class Settings:
     evolution: EvolutionSettings = EvolutionSettings()
     generation: GenerationSettings = GenerationSettings()
     advanced: AdvancedSettings = AdvancedSettings()
+    tutor: TutorSettings = TutorSettings()
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> Settings:
@@ -531,6 +580,7 @@ class Settings:
             evolution=EvolutionSettings.from_env(env),
             generation=GenerationSettings.from_env(env),
             advanced=AdvancedSettings.from_env(env),
+            tutor=TutorSettings.from_env(env),
         )
 
     def with_db(self, db_path: Path | str | None) -> Settings:

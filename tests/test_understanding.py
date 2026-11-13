@@ -18,6 +18,8 @@ from exam_engine.models.syllabus import SyllabusUnitRecord
 from exam_engine.understanding.classification import (
     classify_bloom,
     classify_question_types,
+    ensure_bloom_level,
+    ensure_question_types,
     estimate_difficulty,
 )
 from exam_engine.understanding.mapping import (
@@ -324,6 +326,20 @@ def test_unknown_classifications_are_explicit() -> None:
     assert any(item.code == "difficulty_uncertain" for item in difficulty.uncertainties)
 
 
+def test_service_fallback_uses_defined_labels_instead_of_unclassified() -> None:
+    text = "Zzz qqq."
+    structure = detect_structure(question(text))
+    types = ensure_question_types(text, structure, DEFAULT_TAXONOMY)
+    bloom = ensure_bloom_level(text, structure, types, DEFAULT_TAXONOMY)
+    assert types.primary == QuestionType.DEFINITION.value
+    assert bloom.primary == BloomLevel.REMEMBER.value
+    assert all(label.label in {item.value for item in QuestionType} for label in types.labels)
+    assert all(label.label in {item.value for item in BloomLevel} for label in bloom.labels)
+    assert any(item.code == "fallback_question_type" for item in types.uncertainties)
+    assert any(item.code == "fallback_bloom_level" for item in bloom.uncertainties)
+    assert types.confidence < 0.3 and bloom.confidence < 0.3
+
+
 def test_marks_alone_do_not_assign_a_difficulty_band() -> None:
     text = "Zzz qqq."
     structure = detect_structure(question(text))
@@ -331,6 +347,27 @@ def test_marks_alone_do_not_assign_a_difficulty_band() -> None:
     bloom = classify_bloom(text, structure, types, DEFAULT_TAXONOMY)
     difficulty = estimate_difficulty(text, structure, types, bloom, marks=100)
     assert difficulty.label is DifficultyLabel.UNKNOWN
+    assert any(item.code == "difficulty_uncertain" for item in difficulty.uncertainties)
+
+
+def test_difficulty_uses_text_features_when_type_and_bloom_cues_are_absent() -> None:
+    text = (
+        "Chromatophores take part in :\n"
+        "(1) Photosynthesis\n(2) Growth\n(3) Movement\n(4) Respiration"
+    )
+    structure = detect_structure(question(text))
+    types = classify_question_types(text, structure, DEFAULT_TAXONOMY)
+    bloom = classify_bloom(text, structure, types, DEFAULT_TAXONOMY)
+    assert types.primary is None
+    assert bloom.primary is None
+
+    difficulty = estimate_difficulty(text, structure, types, bloom)
+    assert difficulty.label in {
+        DifficultyLabel.EASY,
+        DifficultyLabel.MODERATE,
+        DifficultyLabel.HARD,
+    }
+    assert difficulty.confidence <= 0.55
     assert any(item.code == "difficulty_uncertain" for item in difficulty.uncertainties)
 
 

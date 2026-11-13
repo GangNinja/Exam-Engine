@@ -65,6 +65,7 @@ class ValidationContext:
     evidence: tuple[SourcePassage, ...] = ()
     thin_evidence: bool = False
     phase3_available: bool = True
+    answer_key_required: bool = True
 
 
 @dataclass
@@ -102,6 +103,17 @@ def _words(text: str) -> list[str]:
 
 def _normalise(text: str) -> str:
     return " ".join(text.casefold().split())
+
+
+def _whole_phrase(label: str, text: str) -> bool:
+    """Match a label as words, not as an accidental substring inside a word."""
+    needle = _normalise(label)
+    if not needle:
+        return False
+    return (
+        re.search(rf"(?<!\w){re.escape(needle)}(?!\w)", _normalise(text))
+        is not None
+    )
 
 
 def _evidence_text(passages: tuple[SourcePassage, ...]) -> str:
@@ -252,10 +264,23 @@ def _check_alignment(findings: _Findings) -> None:
         )
 
     findings.checks.append("alignment.course_isolation")
+    target_labels = [
+        _normalise(label)
+        for label in context.concept_labels.values()
+        if label
+    ]
     foreign = [
         label
         for label in context.forbidden_labels
-        if len(label) >= 6 and _normalise(label) in visible
+        if len(label) >= 6
+        and _whole_phrase(label, visible)
+        # A generic word from another course can be a fragment of the selected
+        # concept's own label (for example "applications" inside "applications in
+        # health and agriculture").  That is not a foreign-course leak.
+        and not any(
+            _normalise(label) in target or target in _normalise(label)
+            for target in target_labels
+        )
     ]
     if foreign:
         findings.add(
@@ -286,7 +311,7 @@ def _check_answerability(findings: _Findings) -> None:
 
     findings.checks.append("answerability.answer_key")
     if question.answer_key is None:
-        if question.format in _KEY_REQUIRED_FORMATS:
+        if question.format in _KEY_REQUIRED_FORMATS and context.answer_key_required:
             findings.add(
                 "missing_answer_key",
                 f"a {question.format.value} question must include an answer key",
@@ -322,6 +347,14 @@ def _check_answerability(findings: _Findings) -> None:
                     ),
                     detail={"quotes": [item[:80] for item in unsupported[:2]]},
                 )
+        elif question.generation_metadata.get("answer_key_status") in {
+            "rubric_only",
+            "reference_outline",
+        }:
+            # These keys are deliberately review rubrics built from the evidence,
+            # not quotations.  There is no factual claim for a quote check to verify;
+            # the human-review requirement is still reported separately.
+            findings.checks.append("answerability.answer_key_rubric")
         else:
             findings.add(
                 "answer_key_unverified",

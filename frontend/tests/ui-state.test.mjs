@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   TUTOR_STATES,
   barData,
+  barSeries,
   coverageLabel,
   coverageTone,
   formatPercent,
@@ -66,6 +67,22 @@ test("bar data sorts real values and keeps a zero-share safe", () => {
   assert.deepEqual(rows.map((row) => row.label), ["B", "A", "C"]);
   assert.equal(rows[0].share, 1);
   assert.equal(rows[2].share, 0);
+});
+
+test("bar series reports omitted categories instead of silently slicing them", () => {
+  const items = [
+    { label: "A", value: 3 },
+    { label: "B", value: 2 },
+    { label: "C", value: 1 },
+  ];
+  const limited = barSeries(items, { limit: 2 });
+  assert.equal(limited.shown, 2);
+  assert.equal(limited.total, 3);
+  assert.equal(limited.truncated, true);
+  assert.deepEqual(limited.rows.map((row) => row.label), ["A", "B"]);
+  const complete = barSeries(items, { limit: 3 });
+  assert.equal(complete.shown, 3);
+  assert.equal(complete.truncated, false);
 });
 
 test("percent formatting distinguishes missing from zero", () => {

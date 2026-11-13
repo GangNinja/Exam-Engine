@@ -1,4 +1,4 @@
-import { h, icon, svg } from "../dom.js";
+import { h, icon } from "../dom.js";
 import { barChart } from "../charts.js";
 import { formatInteger, formatNumber, formatPercent, humaniseCode, safeArray } from "../ui-state.js";
 import {
@@ -44,7 +44,7 @@ export function renderLearning(ctx, mode = "graph") {
   wrap.append(host);
 
   ctx.api
-    .graph(ctx.courseId, { limit: 1200 }, { signal: ctx.signal })
+    .graph(ctx.courseId, { limit: 2000 }, { signal: ctx.signal })
     .then((graph) => host.replaceChildren(pathMode ? renderPathStudio(ctx, graph) : renderLearningGraph(ctx, graph)))
     .catch((error) => {
       if (isAbort(error)) return;
@@ -92,12 +92,31 @@ function renderPathStudio(ctx, graph) {
     });
   }
   const edges = safeArray(graph.prerequisite_edges);
-  const nodes = concepts.slice(0, 500);
+  const incomingCounts = new Map();
+  for (const edge of edges) {
+    incomingCounts.set(edge.target_node_id, (incomingCounts.get(edge.target_node_id) || 0) + 1);
+  }
+  // Put targets with the most stored prerequisites first and select the
+  // strongest one by default. Starting from an unrelated alphabetical concept
+  // made every first path look like a single target with no useful steps.
+  const nodes = [...concepts].sort((left, right) => {
+    const leftCount = incomingCounts.get(left.node_id) || 0;
+    const rightCount = incomingCounts.get(right.node_id) || 0;
+    if (leftCount !== rightCount) return rightCount - leftCount;
+    return left.label.localeCompare(right.label) || left.node_id.localeCompare(right.node_id);
+  });
   const status = graph.status || {};
   const labels = new Map(concepts.map((concept) => [concept.node_id, concept.label]));
+  const targetLabel = (concept) => {
+    const count = incomingCounts.get(concept.node_id) || 0;
+    const evidence = count
+      ? `${formatInteger(count)} direct prerequisite${count === 1 ? "" : "s"}`
+      : "no stored prerequisites";
+    return `${concept.label} — ${evidence}`;
+  };
   const targetSelect = selectControl(
-    nodes.map((concept) => ({ value: concept.node_id, label: concept.label })),
-    { id: "path-target" },
+    nodes.map((concept) => ({ value: concept.node_id, label: targetLabel(concept) })),
+    { id: "path-target", value: nodes[0]?.node_id },
   );
   const setupHost = h("div", { class: "path-setup-host" });
   const resultHost = h("div", { class: "path-result-host" });
@@ -105,9 +124,11 @@ function renderPathStudio(ctx, graph) {
 
   function drawSelection() {
     const concept = nodes.find((node) => node.node_id === targetSelect.value) || nodes[0];
-    setupHost.replaceChildren(renderPathForm(ctx, concept, nodes, resultHost));
-    resultHost.replaceChildren();
     const incoming = edges.filter((edge) => edge.target_node_id === concept.node_id);
+    setupHost.replaceChildren(
+      renderPathForm(ctx, concept, nodes, resultHost, hasSupportedEvidence(incoming)),
+    );
+    resultHost.replaceChildren();
     prerequisiteHost.replaceChildren(
       h(
         "div",
@@ -134,8 +155,8 @@ function renderPathStudio(ctx, graph) {
                 ),
               ),
             ),
-          )
-        : h("p", { class: "muted", text: "No direct prerequisite edge is stored for this target. The generated path will state that limitation." }),
+                  )
+      : h("p", { class: "muted", text: "No direct prerequisite edge is stored for this target, so the generated plan can only contain the target itself. Pick a target with a stored prerequisite count above zero for an ordered path." }),
       h(
         "div",
         { class: "path-scope-links" },
@@ -172,7 +193,7 @@ function renderPathStudio(ctx, graph) {
         "Path setup",
         {
           eyebrow: "Choose a destination",
-          description: "Ordering follows stored prerequisite evidence. You can mark existing knowledge to shorten the path.",
+          description: "A learning path works backwards from the target through stored prerequisite edges, so prerequisites come first. It cannot invent a chain when none is stored.",
         },
         h(
           "label",
@@ -180,8 +201,15 @@ function renderPathStudio(ctx, graph) {
           h("span", { text: "Target concept" }),
           targetSelect,
         ),
-        concepts.length > nodes.length
-          ? h("p", { class: "muted", text: `The selector shows the first ${formatInteger(nodes.length)} concepts. Narrow the graph through the course scope for a complete export.` })
+        h("p", {
+          class: "muted",
+          text: "Targets are listed with their direct prerequisite count. Choose one with a count above zero to get an ordered path; a target with no stored prerequisite can only return itself.",
+        }),
+        graph.truncated
+          ? h("p", {
+              class: "muted",
+              text: `The graph response was truncated at ${formatInteger(concepts.length)} concepts; increase the graph limit or narrow the course scope for a complete list.`,
+            })
           : null,
         setupHost,
       ),
@@ -238,11 +266,12 @@ function renderLearningGraph(ctx, graph) {
           eyebrow: "Graph scope",
           description: "Adjacency storage with evidence on every edge; it is not a graph database.",
         },
-        h(
-          "p",
-          { class: "muted" },
-          `This view shows up to 1,200 concepts. ${graph.truncated ? "The list was truncated; narrow the graph through the CLI for full export." : "All course-scoped concepts are shown."}`,
-        ),
+        h("p", {
+          class: "muted",
+          text: graph.truncated
+            ? `The graph response was truncated at ${formatInteger(concepts.length)} concepts; narrow the graph scope for a complete list.`
+            : `All ${formatInteger(concepts.length)} course-scoped concepts are shown.`,
+        }),
         safeArray(graph.prerequisite_edges).length
           ? h(
               "p",
@@ -281,14 +310,16 @@ function renderLearningGraph(ctx, graph) {
     "aria-label": "Filter concepts",
     autocomplete: "off",
   });
+  search.addEventListener("input", drawList);
   const detailHost = h("div", { class: "concept-detail" }, h("p", { class: "muted", text: "Choose a concept to inspect its stored relationships." }));
+  const pathResultHost = h("div", { class: "path-result-host path-result-wide", "aria-label": "Generated learning path" });
   let selectedId = null;
 
   function drawList() {
     const query = search.value.trim().toLocaleLowerCase();
     const filtered = concepts.filter((concept) => !query || concept.label.toLocaleLowerCase().includes(query));
     conceptButtons.replaceChildren(
-      ...filtered.slice(0, 300).map((concept) => {
+      ...filtered.map((concept) => {
         const button = h(
           "button",
           {
@@ -318,6 +349,7 @@ function renderLearningGraph(ctx, graph) {
   }
 
   async function loadConcept(concept) {
+    pathResultHost.replaceChildren();
     detailHost.replaceChildren(inlineLoading(`Reading neighbourhood of ${concept.label}…`));
     try {
       const neighborhood = await ctx.api.neighborhood(
@@ -325,7 +357,7 @@ function renderLearningGraph(ctx, graph) {
         { node_id: concept.node_id, hops: 1 },
         { signal: ctx.signal },
       );
-      detailHost.replaceChildren(renderConceptDetail(ctx, graph, concept, neighborhood));
+      detailHost.replaceChildren(renderConceptDetail(ctx, graph, concept, neighborhood, pathResultHost));
     } catch (error) {
       if (isAbort(error)) return;
       detailHost.replaceChildren(
@@ -355,8 +387,12 @@ function renderLearningGraph(ctx, graph) {
       ),
     ),
   );
+  // The ordered path table is wider than the concept-detail column. Mount it
+  // below the explorer so every course gets the full workspace width.
+  wrap.append(pathResultHost);
 
-  const prereqRows = safeArray(graph.prerequisite_edges).slice(0, 100);
+  const prerequisiteEdges = safeArray(graph.prerequisite_edges);
+  const prereqRows = prerequisiteEdges.slice(0, 100);
   const labels = new Map(concepts.map((concept) => [concept.node_id, concept.label]));
   wrap.append(
     panel(
@@ -371,7 +407,10 @@ function renderLearningGraph(ctx, graph) {
         { class: "graph-top graph-top-reverse" },
         prereqRows.length
           ? dataTable({
-              caption: "Stored prerequisite edges",
+              caption:
+                prereqRows.length < prerequisiteEdges.length
+                  ? `Stored prerequisite edges · ${formatInteger(prereqRows.length)} of ${formatInteger(prerequisiteEdges.length)} shown`
+                  : "Stored prerequisite edges",
               columns: [
                 { label: "Before", render: (row) => labels.get(row.source_node_id) || row.source_node_id },
                 { label: "After", render: (row) => labels.get(row.target_node_id) || row.target_node_id },
@@ -402,7 +441,7 @@ function renderLearningGraph(ctx, graph) {
   return wrap;
 }
 
-function renderConceptDetail(ctx, graph, concept, neighborhood) {
+function renderConceptDetail(ctx, graph, concept, neighborhood, pathResultHost) {
   const nodes = safeArray(neighborhood.nodes);
   const edges = safeArray(neighborhood.edges);
   const labels = new Map(nodes.map((node) => [node.node_id, node.label]));
@@ -412,7 +451,6 @@ function renderConceptDetail(ctx, graph, concept, neighborhood) {
   const prerequisites = safeArray(graph.prerequisite_edges).filter(
     (edge) => edge.target_node_id === concept.node_id,
   );
-  const pathHost = h("div", { class: "path-host" });
   const wrap = h("div", { class: "view-stack" });
   wrap.append(
     h(
@@ -425,7 +463,7 @@ function renderConceptDetail(ctx, graph, concept, neighborhood) {
       ),
     ),
   );
-  wrap.append(renderNeighborhood(concept, neighborhood));
+  wrap.append(renderNeighborhood(ctx, concept, neighborhood));
 
   wrap.append(
     h(
@@ -470,15 +508,14 @@ function renderConceptDetail(ctx, graph, concept, neighborhood) {
         {},
         h("h4", { text: "Build a learning path" }),
         h("p", { class: "muted", text: "Ordering reuses stored prerequisites. Candidate-only plans are explicitly partial." }),
-        renderPathForm(ctx, concept, nodes, pathHost),
-        pathHost,
+        renderPathForm(ctx, concept, nodes, pathResultHost, hasSupportedEvidence(prerequisites)),
       ),
     ),
   );
   return wrap;
 }
 
-function renderPathForm(ctx, concept, nodes, host) {
+function renderPathForm(ctx, concept, nodes, host, hasSupportedPrerequisites = false) {
   const knownSelect = h(
     "select",
     { multiple: true, size: "5", id: `known-${concept.node_id}`, "aria-label": "Concepts already known" },
@@ -487,7 +524,16 @@ function renderPathForm(ctx, concept, nodes, host) {
       .map((node) => h("option", { value: node.node_id, text: node.label })),
   );
   const maxDepth = h("input", { type: "number", min: "1", max: "32", value: "8", id: `depth-${concept.node_id}` });
-  const includeCandidates = h("input", { type: "checkbox", checked: true, id: `candidates-${concept.node_id}` });
+  // Stored prerequisites are currently candidate evidence in every course.
+  // When this target has no supported relationship, include candidates by
+  // default so the studio produces a path, but keep them visibly unverified
+  // and the resulting plan partial. Supported evidence keeps the strict
+  // verified-first default.
+  const includeCandidates = h("input", {
+    type: "checkbox",
+    checked: !hasSupportedPrerequisites,
+    id: `candidates-${concept.node_id}`,
+  });
   const status = h("p", { class: "form-status", role: "status", "aria-live": "polite" });
   const submit = h(
     "button",
@@ -506,7 +552,7 @@ function renderPathForm(ctx, concept, nodes, host) {
         "label",
         { class: "checkbox-field" },
         includeCandidates,
-        h("span", { text: "Include review candidates" }),
+        h("span", { text: "Include review candidates (unverified)" }),
       ),
     ),
     h("div", { class: "form-actions" }, submit),
@@ -525,7 +571,7 @@ function renderPathForm(ctx, concept, nodes, host) {
           target_node_id: concept.node_id,
           known_concept_ids: [...knownSelect.selectedOptions].map((option) => option.value),
           include_candidates: includeCandidates.checked,
-          include_inferred: false,
+          include_inferred: includeCandidates.checked,
           max_depth: Number(maxDepth.value) || 8,
         },
         { signal: ctx.signal },
@@ -533,6 +579,7 @@ function renderPathForm(ctx, concept, nodes, host) {
       status.dataset.tone = "positive";
       status.textContent = "Path generated from stored relationships.";
       host.replaceChildren(renderPathPlan(plan));
+      host.scrollIntoView({ block: "nearest" });
     } catch (error) {
       if (isAbort(error)) return;
       status.dataset.tone = "negative";
@@ -549,12 +596,22 @@ function renderPathForm(ctx, concept, nodes, host) {
 
 function renderPathPlan(plan) {
   const steps = safeArray(plan.steps);
+  const skippedKnown = safeArray(plan.known_concepts_skipped);
+  const targetOnly =
+    steps.length === 1 && steps[0]?.role === "target" && !skippedKnown.length;
   return panel(
     "Learning path",
     {
       eyebrow: `Status: ${humaniseCode(plan.status)}`,
       description: "Dependency order from the stored graph, not proven pedagogy or a study-time estimate.",
     },
+    targetOnly
+      ? notice(
+          "Only the target is available because no prerequisite relationship is stored for it. Choose a target with a stored prerequisite count above zero, or open the knowledge graph to inspect its relationships.",
+          "caution",
+          "Target-only path",
+        )
+      : null,
     steps.length
       ? dataTable({
           caption: "Ordered learning path",
@@ -570,11 +627,11 @@ function renderPathPlan(plan) {
           rows: steps,
         })
       : h("p", { class: "muted", text: "The path contains no step. No dependency evidence was found for this target." }),
-    safeArray(plan.known_concepts_skipped).length
+    skippedKnown.length
       ? h(
           "p",
           { class: "muted" },
-          `Skipped as already known: ${plan.known_concepts_skipped.map((item) => item.label).join(", ")}.`,
+          `Skipped as already known: ${skippedKnown.map((item) => item.label).join(", ")}.`,
         )
       : null,
     safeArray(plan.limitations).length
@@ -583,87 +640,169 @@ function renderPathPlan(plan) {
   );
 }
 
-function renderNeighborhood(concept, neighborhood) {
+function renderNeighborhood(ctx, concept, neighborhood) {
   const nodes = safeArray(neighborhood.nodes);
   const edges = safeArray(neighborhood.edges);
   if (!nodes.length) {
     return h("p", { class: "muted", text: "No neighbourhood is available for this concept." });
   }
-  const width = 720;
-  const height = 380;
-  const cx = width / 2;
-  const cy = height / 2;
-  const others = nodes.filter((node) => node.node_id !== concept.node_id).slice(0, 10);
-  const positions = new Map([[concept.node_id, { x: cx, y: cy }]]);
-  others.forEach((node, index) => {
-    const angle = (Math.PI * 2 * index) / Math.max(others.length, 1) - Math.PI / 2;
-    positions.set(node.node_id, {
-      x: cx + Math.cos(angle) * 150,
-      y: cy + Math.sin(angle) * 120,
-    });
-  });
-  const edgeNodes = edges.flatMap((edge) => {
-    const source = positions.get(edge.source_node_id);
-    const target = positions.get(edge.target_node_id);
-    if (!source || !target) return [];
-    return [
-      svg("line", {
-        x1: source.x,
-        y1: source.y,
-        x2: target.x,
-        y2: target.y,
-        class: `graph-edge edge-${edge.status || "observed"}`,
-      }),
-    ];
-  });
-  const nodeNodes = nodes
-    .filter((node) => positions.has(node.node_id))
-    .map((node) => {
-      const position = positions.get(node.node_id);
-      const isCenter = node.node_id === concept.node_id;
-      const label = node.label.length > 22 ? `${node.label.slice(0, 21)}…` : node.label;
-      return svg(
-        "g",
-        { class: `graph-node ${isCenter ? "is-center" : ""}` },
-        svg("circle", { cx: position.x, cy: position.y, r: isCenter ? 30 : 20 }),
-        svg("text", { x: position.x, y: position.y + (isCenter ? 48 : 38), "text-anchor": "middle", text: label }),
-        svg("title", { text: `${node.label} (${humaniseCode(node.node_type)})` }),
-      );
-    });
-  const svgNode = svg(
-    "svg",
-    {
-      class: "graph-svg",
-      viewBox: `0 0 ${width} ${height}`,
-      role: "img",
-      "aria-label": `Neighbourhood of ${concept.label}. ${others.map((node) => node.label).join(", ")}.`,
-    },
-    ...edgeNodes,
-    ...nodeNodes,
-  );
+  const centerId = concept.node_id;
+  const byId = new Map(nodes.map((node) => [node.node_id, node]));
+  const center = byId.get(centerId) || concept;
+  const rows = [];
+  const seen = new Set();
+  for (const edge of edges) {
+    if (edge.source_node_id !== centerId && edge.target_node_id !== centerId) continue;
+    const outgoing = edge.source_node_id === centerId;
+    const otherId = outgoing ? edge.target_node_id : edge.source_node_id;
+    const other = byId.get(otherId);
+    if (!other || other.node_id === centerId || other.node_type === "question") continue;
+    const key = `${other.node_id}\u0000${edge.relationship}\u0000${outgoing}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    rows.push({ other, edge, outgoing });
+  }
+  for (const node of nodes) {
+    if (node.node_id === centerId || node.node_type === "question") continue;
+    if (rows.some((row) => row.other.node_id === node.node_id)) continue;
+    rows.push({ other: node, edge: null, outgoing: null });
+  }
+  const groups = [
+    { key: "prerequisites", label: "Prerequisites" },
+    { key: "unlocks", label: "Unlocks" },
+    { key: "related", label: "Related concepts" },
+    { key: "context", label: "Curriculum context" },
+    { key: "other", label: "Other relationships" },
+  ].map((group) => ({
+    ...group,
+    rows: rows.filter((row) => neighborhoodGroup(row) === group.key),
+  })).filter((group) => group.rows.length);
+  const questionCount = nodes.filter((node) => node.node_type === "question").length;
+  const linkedCount = new Set(rows.map((row) => row.other.node_id)).size;
+
+  const card = (row) => {
+    const { other, edge, outgoing } = row;
+    return h(
+      "article",
+      { class: "neighborhood-card" },
+      h("strong", { class: "neighborhood-card-label", text: other.label }),
+      h(
+        "div",
+        { class: "neighborhood-card-meta" },
+        statusBadge(humaniseCode(other.node_type), "neutral"),
+        edge
+          ? statusBadge(
+              humaniseCode(edge.status || "unknown"),
+              edge.status === "candidate" ? "caution" : "positive",
+            )
+          : null,
+        edge
+          ? h("span", {
+              class: "neighborhood-card-relation",
+              text: `${outgoing ? "Outgoing" : "Incoming"} · ${humaniseCode(edge.relationship)}`,
+            })
+          : null,
+      ),
+    );
+  };
+
   return h(
     "div",
-    { class: "graph-visual" },
-    svgNode,
+    { class: "graph-visual neighborhood-board" },
     h(
-      "details",
-      { class: "chart-data" },
-      h("summary", { text: "View relationships as data" }),
+      "div",
+      { class: "neighborhood-center" },
+      h("p", { class: "eyebrow", text: "Selected concept" }),
+      h("h3", { class: "neighborhood-center-label", text: center.label }),
       h(
-        "ul",
-        { class: "compact-list" },
-        ...edges.map((edge) =>
-          h("li", {
-            text: `${labelsFor(nodes, edge.source_node_id)} → ${labelsFor(nodes, edge.target_node_id)} (${humaniseCode(edge.relationship)}, ${humaniseCode(edge.status)})`,
-          }),
-        ),
+        "div",
+        { class: "neighborhood-center-meta" },
+        statusBadge(humaniseCode(center.node_type), "neutral"),
+        h("span", {
+          class: "muted",
+          text: `${formatInteger(linkedCount)} linked node${linkedCount === 1 ? "" : "s"}`,
+        }),
       ),
     ),
+    groups.length
+      ? groups.map((group) =>
+          h(
+            "section",
+            { class: "neighborhood-group" },
+            h(
+              "h4",
+              { class: "neighborhood-group-title" },
+              group.label,
+              h("span", { class: "muted", text: ` ${formatInteger(group.rows.length)}` }),
+            ),
+            h("div", { class: "neighborhood-cards" }, ...group.rows.map(card)),
+          ),
+        )
+      : h("p", {
+          class: "muted",
+          text: "No stored concept-to-concept relationship is available for this concept in the selected course.",
+        }),
+    questionCount
+      ? h(
+          "p",
+          { class: "muted neighborhood-question-note" },
+          `${formatInteger(questionCount)} stored question${questionCount === 1 ? "" : "s"} also connect to this concept. `,
+          h(
+            "a",
+            {
+              class: "text-link",
+              href: `#/exams/questions?course=${encodeURIComponent(ctx.courseId)}&search=${encodeURIComponent(center.label)}`,
+            },
+            "Open in the question bank",
+            icon("arrow"),
+          ),
+        )
+      : null,
+    edges.length
+      ? h(
+          "details",
+          { class: "disclosure neighborhood-relationships" },
+          h(
+            "summary",
+            {},
+            h("strong", { text: "All retrieved relationships" }),
+            h("span", { class: "muted", text: ` ${formatInteger(edges.length)}` }),
+          ),
+          h(
+            "ul",
+            { class: "compact-list neighborhood-edge-list" },
+            ...edges.map((edge) => {
+              const source = byId.get(edge.source_node_id)?.label || edge.source_node_id;
+              const target = byId.get(edge.target_node_id)?.label || edge.target_node_id;
+              return h("li", {
+                text: `${source} → ${target} (${humaniseCode(edge.relationship)}, ${humaniseCode(edge.status)})`,
+              });
+            }),
+          ),
+        )
+      : null,
   );
 }
 
-function labelsFor(nodes, nodeId) {
-  return nodes.find((node) => node.node_id === nodeId)?.label || nodeId;
+function neighborhoodGroup(row) {
+  if (!row.edge) {
+    return row.other.node_type === "concept" ? "other" : "context";
+  }
+  const relationship = String(row.edge.relationship || "").toUpperCase();
+  if (relationship === "PREREQUISITE_OF") {
+    return row.outgoing ? "unlocks" : "prerequisites";
+  }
+  if (relationship === "RELATED_TO") return "related";
+  if (["CONTAINS", "BELONGS_TO", "DERIVED_FROM", "APPEARS_IN"].includes(relationship)) {
+    return "context";
+  }
+  return row.other.node_type === "concept" ? "other" : "context";
+}
+
+function hasSupportedEvidence(edges) {
+  return safeArray(edges).some(
+    (edge) => edge.status !== "candidate" && edge.status !== "inferred",
+  );
 }
 
 function isAbort(error) {

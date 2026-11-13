@@ -21,7 +21,14 @@ from exam_engine.models.enums import (
     SourceFormat,
 )
 from exam_engine.models.ingestion import BatchIngestionResult, IngestionError, IngestionResult
-from exam_engine.models.provenance import DatasetSource
+from exam_engine.models.provenance import (
+    DatasetSource,
+    IdentityStatus,
+    ProvenanceRecord,
+    ProvenanceScope,
+    SourceClassification,
+    make_provenance_id,
+)
 from exam_engine.models.question import (
     QuestionRecord,
     Uncertainty,
@@ -41,6 +48,7 @@ __all__ = [
     "CourseRecord",
     "DatasetSource",
     "DatasetType",
+    "IdentityStatus",
     "DocumentKind",
     "DocumentRecord",
     "DuplicatePolicy",
@@ -51,15 +59,19 @@ __all__ = [
     "IngestionResult",
     "IngestionStatus",
     "PageRecord",
+    "ProvenanceRecord",
+    "ProvenanceScope",
     "QuestionRecord",
     "SegmentationStatus",
     "Severity",
+    "SourceClassification",
     "SourceFormat",
     "SyllabusRecord",
     "SyllabusUnitRecord",
     "Uncertainty",
     "content_digest",
     "make_document_id",
+    "make_provenance_id",
     "make_question_id",
     "make_syllabus_id",
     "make_unit_id",

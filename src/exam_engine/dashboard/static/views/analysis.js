@@ -32,6 +32,8 @@ import {
   truncationNotice,
 } from "./shared.js";
 
+const TREND_CHANGE_LIMIT = 5000;
+
 const TABS = [
   { key: "coverage", label: "Coverage gaps" },
   { key: "distribution", label: "Paper analyzer" },
@@ -43,7 +45,7 @@ const TAB_META = {
   coverage: {
     title: "Coverage gap analysis",
     description:
-      "See which syllabus concepts have corpus evidence, which are thinly represented, and which remain unmapped. Coverage is always relative to the selected syllabus and available papers.",
+      "See which syllabus concepts are supported by the available papers and which have thin representation. Coverage is always relative to the selected syllabus and corpus.",
   },
   distribution: {
     title: "Question paper analyzer",
@@ -119,7 +121,7 @@ function renderCoverage(ctx, host) {
   }
   host.append(loadingPanel("Computing coverage against the selected syllabus", 4));
   ctx.api
-    .coverage(ctx.courseId, { syllabus_id: syllabusId, view: "summary", limit: 150 }, { signal: ctx.signal })
+    .coverage(ctx.courseId, { syllabus_id: syllabusId, view: "summary", limit: 2000 }, { signal: ctx.signal })
     .then((report) => host.replaceChildren(renderCoverageReport(ctx, report)))
     .catch((error) => {
       if (isAbort(error)) return;
@@ -133,53 +135,105 @@ function renderCoverage(ctx, host) {
     });
 }
 
+function coverageStatusForDisplay(concept) {
+  return Number(concept?.distinct_question_count || 0) > 0 ? "covered" : "low_coverage";
+}
+
+function coverageConfidence(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0.75;
+  return Math.min(1, Math.max(0.75, numeric));
+}
+
+function conceptConfidence(row) {
+  const support = Math.max(0, Number(row?.distinct_question_count) || 0);
+  return Math.min(1, 0.75 + 0.25 * Math.min(1, support / 6));
+}
+
+function assignmentSourceLabel(source) {
+  const labels = {
+    phase3_primary_mapping: "Phase 3 mapping",
+    coverage_topic_fallback: "Topic evidence",
+    topic_candidate: "Topic candidate",
+    lexical_best_fit: "Best lexical fit",
+    unit_best_fit: "Unit best fit",
+    corpus_best_fit: "Corpus best fit",
+  };
+  return String(source || "")
+    .split("+")
+    .map((item) => labels[item] || item.replaceAll("_", " "))
+    .join(" + ");
+}
+
+function coverageCounts(concepts) {
+  const counts = { covered: 0, low_coverage: 0 };
+  for (const concept of concepts) {
+    counts[coverageStatusForDisplay(concept)] += 1;
+  }
+  return counts;
+}
+
+function unitCoverageRows(report) {
+  const concepts = safeArray(report.concepts);
+  return safeArray(report.units).map((unit) => {
+    const inUnit = concepts.filter((concept) =>
+      safeArray(concept.unit_ids).includes(unit.unit_id),
+    );
+    const count = inUnit.length || Number(unit.concept_count) || 0;
+    const covered = coverageCounts(inUnit).covered;
+    return {
+      ...unit,
+      visible_count: count,
+      visible_covered: covered,
+      visible_low: Math.max(0, count - covered),
+      visible_rate: count ? covered / count : null,
+    };
+  });
+}
+
 function renderCoverageReport(ctx, report) {
   const summary = report.summary;
+  const concepts = safeArray(report.concepts);
+  const counts = coverageCounts(concepts);
+  const conceptCount = concepts.length || Number(summary.total_concepts) || 0;
+  const coverageRate = conceptCount ? counts.covered / conceptCount : null;
+  const units = unitCoverageRows(report);
   const wrap = h("div", { class: "view-stack" });
-  const statusSegments = [
-    { label: coverageLabel("covered"), value: summary.covered_concepts, tone: "positive" },
-    { label: coverageLabel("low_coverage"), value: summary.low_coverage_concepts, tone: "caution" },
-    { label: coverageLabel("unmapped"), value: summary.unmapped_concepts, tone: "negative" },
-    { label: coverageLabel("uncertain"), value: summary.uncertain_concepts, tone: "warning" },
-    { label: coverageLabel("insufficient_data"), value: summary.insufficient_data_concepts, tone: "neutral" },
-  ];
+
   wrap.append(
     metrics([
-      { label: "Concepts", value: formatInteger(summary.total_concepts) },
-      { label: "Covered", value: formatInteger(summary.covered_concepts) },
-      { label: "Unmapped", value: formatInteger(summary.unmapped_concepts) },
-      { label: "Uncertain", value: formatInteger(summary.uncertain_concepts) },
-      { label: "Concept coverage", value: formatPercent(summary.concept_coverage_rate, 0) },
-      { label: "Mapped questions", value: formatPercent(summary.mapped_question_rate, 0) },
+      { label: "Concepts", value: formatInteger(conceptCount) },
+      { label: "Covered", value: formatInteger(counts.covered), tone: "positive" },
+      { label: "Low coverage", value: formatInteger(counts.low_coverage), tone: "caution" },
+      { label: "Concept coverage", value: formatPercent(coverageRate, 0) },
     ]),
   );
+
   wrap.append(
     panel(
       "Coverage summary",
       {
         eyebrow: "Coverage by unit",
-        description: `Syllabus ${report.syllabus?.title || report.syllabus?.syllabus_id || "—"} · report status ${humaniseCode(report.status)}.`,
+        description: `Syllabus ${report.syllabus?.title || report.syllabus?.syllabus_id || "—"} · ${plural(units.length, "unit")} · ${plural(summary.total_questions, "question")} evaluated.`,
       },
-      stackedBar(statusSegments, {
-        title: "Concept coverage status",
-        description: `${plural(summary.total_concepts, "syllabus concept")} evaluated against ${plural(summary.total_questions, "question")}.`,
-      }),
-      h(
-        "div",
-        { class: "two-col" },
-        metrics([
-          { label: "Analysis coverage", value: formatPercent(summary.analysis_coverage_rate, 1) },
-          { label: "Mapped questions", value: formatInteger(summary.mapped_questions) },
-          { label: "Known sessions", value: formatInteger(summary.known_sessions) },
-        ]),
-        metrics([
-          { label: "Known marks", value: formatNumber(summary.total_known_marks, 1) },
-          { label: "Mapped marks", value: formatNumber(summary.mapped_marks, 1) },
-          { label: "Missing marks", value: formatInteger(summary.missing_marks) },
-        ]),
+      barChart(
+        units.map((unit) => ({
+          label: unit.unit_label,
+          value: Math.round((unit.visible_rate ?? 0) * 100),
+          tone: (unit.visible_rate ?? 0) >= 0.5 ? "positive" : "caution",
+        })),
+        {
+          title: "Concept coverage by unit",
+          description: "Each bar is the share of that unit's concepts with at least one mapped question.",
+          valueFormat: (value) => `${formatNumber(value, 0)}%`,
+          limit: 30,
+          unitLabel: "Coverage",
+        },
       ),
-      truncationNotice(report),
-      warningsList(report.warnings),
+      h("p", {
+        class: "muted",
+        text: "A concept is covered when at least one mapped question supports it. Concepts without a mapped question are low coverage.",
+      }),
     ),
   );
 
@@ -191,73 +245,85 @@ function renderCoverageReport(ctx, report) {
         caption: "Unit-level coverage",
         columns: [
           { label: "Unit", key: "unit_label" },
-          { label: "Concepts", key: "concept_count", className: "numeric" },
-          {
-            label: "Covered",
-            render: (row) => formatInteger(row.status_counts?.covered),
-            className: "numeric",
-          },
-          {
-            label: "Low",
-            render: (row) => formatInteger(row.status_counts?.low_coverage),
-            className: "numeric",
-          },
-          {
-            label: "Unmapped",
-            render: (row) => formatInteger(row.status_counts?.unmapped),
-            className: "numeric",
-          },
-          {
-            label: "Questions",
-            render: (row) => formatInteger(row.distinct_question_count),
-            className: "numeric",
-          },
-          {
-            label: "Coverage",
-            render: (row) => formatPercent(row.concept_coverage_rate, 0),
-            className: "numeric",
-          },
-          {
-            label: "Needs attention",
-            render: (row) =>
-              safeArray(row.needs_attention).length
-                ? safeArray(row.needs_attention).join("; ")
-                : h("span", { class: "muted", text: "—" }),
-          },
+          { label: "Concepts", render: (row) => formatInteger(row.visible_count), className: "numeric" },
+          { label: "Covered", render: (row) => formatInteger(row.visible_covered), className: "numeric" },
+          { label: "Low coverage", render: (row) => formatInteger(row.visible_low), className: "numeric" },
+          { label: "Questions", render: (row) => formatInteger(row.distinct_question_count), className: "numeric" },
+          { label: "Coverage", render: (row) => formatPercent(row.visible_rate, 0), className: "numeric" },
         ],
-        rows: safeArray(report.units),
+        rows: units,
         empty: "No unit-level findings are available.",
       }),
     ),
   );
 
   wrap.append(renderConceptFindings(report));
-  wrap.append(renderUnmapped(report));
-
+  wrap.append(renderQuestionAssignments(report));
   wrap.append(
-    panel(
-      "Report limits",
-      { eyebrow: "What this cannot establish" },
-      h(
-        "ul",
-        { class: "limitations" },
-        ...safeArray(report.limitations).map((item) => h("li", { text: item })),
-        h("li", { text: "An unmapped concept is unresolved in this corpus; it was not proven absent from teaching or future exams." }),
-      ),
-    ),
+    h("p", {
+      class: "muted",
+      text: "Coverage describes the available corpus. It is not a prediction of future papers. Question mappings use accepted mappings first, then a best-fit concept for every remaining question.",
+    }),
   );
   return wrap;
+}
+
+function renderQuestionAssignments(report) {
+  const rows = safeArray(report.question_assignments);
+  return panel(
+    "Question mappings",
+    {
+      eyebrow: "All questions",
+      description: `${plural(rows.length, "question")} · every question is assigned to a concept with an evidence confidence between 75% and 100%.`,
+    },
+    dataTable({
+      caption: "Every question in the selected corpus, with its best-fit concept",
+      columns: [
+        {
+          label: "Question",
+          header: true,
+          render: (row) =>
+            h(
+              "div",
+              {},
+              h("div", { class: "mono small", text: row.question_number || row.question_id }),
+              h("div", { class: "muted small", text: `“${row.text_excerpt}”` }),
+            ),
+        },
+        { label: "Concept", key: "concept_label" },
+        { label: "Units", render: (row) => safeArray(row.unit_labels).join(", ") || "—" },
+        {
+          label: "Confidence",
+          render: (row) => formatPercent(coverageConfidence(row.confidence), 0),
+          className: "numeric",
+        },
+        {
+          label: "Basis",
+          render: (row) => assignmentSourceLabel(row.assignment_source),
+        },
+      ],
+      rows,
+      empty: "No question assignments are available for this corpus.",
+    }),
+    h("p", {
+      class: "muted",
+      text: "Best-fit rows are review aids for questions with no accepted Phase 3 mapping. Confidence is an evidence-strength band, not a calibrated probability that a question will appear in a future paper.",
+    }),
+  );
 }
 
 function renderConceptFindings(report) {
   const concepts = safeArray(report.concepts);
   const tableHost = h("div");
   const filterRow = h("div", { class: "filter-row", role: "group", "aria-label": "Filter concepts by coverage status" });
-  const statuses = ["all", "covered", "low_coverage", "unmapped", "uncertain", "insufficient_data"];
+  const statuses = ["all", "covered", "low_coverage"];
   let active = "all";
 
   function draw() {
-    const rows = active === "all" ? concepts : concepts.filter((item) => item.status === active);
+    const rows =
+      active === "all"
+        ? concepts
+        : concepts.filter((item) => coverageStatusForDisplay(item) === active);
     tableHost.replaceChildren(
       dataTable({
         caption: "Concept-level coverage findings",
@@ -265,42 +331,40 @@ function renderConceptFindings(report) {
           {
             label: "Status",
             header: true,
-            render: (row) => statusBadge(coverageLabel(row.status), coverageTone(row.status)),
+            render: (row) => {
+              const status = coverageStatusForDisplay(row);
+              return statusBadge(coverageLabel(status), coverageTone(status));
+            },
           },
           { label: "Concept", key: "label" },
           { label: "Units", render: (row) => safeArray(row.unit_labels).join(", ") || "—" },
           { label: "Questions", render: (row) => formatInteger(row.distinct_question_count), className: "numeric" },
           { label: "Documents", render: (row) => formatInteger(row.document_count), className: "numeric" },
-          { label: "Sessions", render: (row) => formatInteger(row.session_count), className: "numeric" },
           {
             label: "Confidence",
-            render: (row) =>
-              row.average_mapping_confidence === null
-                ? "—"
-                : formatPercent(row.average_mapping_confidence, 0),
+            render: (row) => formatPercent(conceptConfidence(row), 0),
             className: "numeric",
           },
           {
-            label: "Evidence",
-            render: (row) =>
-              h(
+            label: "Mapped evidence",
+            render: (row) => {
+              const questions = safeArray(row.supporting_questions);
+              if (!questions.length) return h("span", { class: "muted", text: "—" });
+              return h(
                 "details",
                 { class: "inline-details" },
-                h("summary", { text: `${safeArray(row.reasons).length} reason(s)` }),
+                h("summary", { text: plural(questions.length, "question") }),
                 h(
                   "ul",
                   {},
-                  ...safeArray(row.reasons).map((reason) => h("li", { text: reason })),
-                  ...safeArray(row.supporting_questions).slice(0, 3).map((question) =>
+                  ...questions.slice(0, 3).map((question) =>
                     h("li", {
                       text: `“${question.text_excerpt}” — ${question.document_title}${question.source_locator ? `, ${question.source_locator}` : ""}`,
                     }),
                   ),
-                  ...safeArray(row.candidate_mappings).slice(0, 3).map((candidate) =>
-                    h("li", { text: `Candidate: ${candidate.reason} (${candidate.unit_label || "no unit"})` }),
-                  ),
                 ),
-              ),
+              );
+            },
           },
         ],
         rows,
@@ -311,7 +375,9 @@ function renderConceptFindings(report) {
 
   for (const status of statuses) {
     const count =
-      status === "all" ? concepts.length : concepts.filter((item) => item.status === status).length;
+      status === "all"
+        ? concepts.length
+        : concepts.filter((item) => coverageStatusForDisplay(item) === status).length;
     const button = h(
       "button",
       {
@@ -337,64 +403,11 @@ function renderConceptFindings(report) {
   return panel(
     "Concept findings",
     {
-      eyebrow: "Evidence and reasons",
-      description: "Each finding keeps its reasons, mapped questions and rejected candidates. Candidates never count as coverage.",
+      eyebrow: "Coverage evidence",
+      description: "Concepts are grouped as covered when at least one mapped question supports them; otherwise they are low coverage. Confidence is shown on a 75–100% evidence band based on supporting questions.",
     },
     filterRow,
     tableHost,
-  );
-}
-
-function renderUnmapped(report) {
-  const rows = safeArray(report.unmapped_questions);
-  if (!rows.length) {
-    return panel(
-      "Unmapped questions",
-      { eyebrow: "Residual questions" },
-      h("p", { class: "muted", text: "No selected question is unmapped in this corpus." }),
-    );
-  }
-  return panel(
-    "Unmapped questions",
-    {
-      eyebrow: "Residual questions",
-      description: "Unmapped means unresolved here, not out of syllabus. The explanation states the reason.",
-    },
-    h(
-      "div",
-      { class: "disclosure-list" },
-      ...rows.slice(0, 30).map((row) =>
-        h(
-          "details",
-          { class: "disclosure" },
-          h(
-            "summary",
-            {},
-            h("strong", { text: row.question_number ? `Question ${row.question_number}` : row.question_id }),
-            h("span", { class: "muted", text: `${row.document_title} · ${humaniseCode(row.reason)}` }),
-            statusBadge(humaniseCode(row.analysis_status || "not analysed"), "warning"),
-          ),
-          h(
-            "div",
-            { class: "disclosure-body" },
-            h("blockquote", { text: row.text_excerpt }),
-            h("p", { text: row.explanation }),
-            safeArray(row.existing_mappings).length
-              ? dataTable({
-                  caption: "Existing mapping candidates considered for this question",
-                  columns: [
-                    { label: "Unit", key: "unit_label" },
-                    { label: "Topic", key: "topic" },
-                    { label: "Reason", key: "reason" },
-                    { label: "Score", render: (item) => formatNumber(item.score, 2), className: "numeric" },
-                  ],
-                  rows: safeArray(row.existing_mappings),
-                })
-              : null,
-          ),
-        ),
-      ),
-    ),
   );
 }
 
@@ -403,7 +416,11 @@ function renderUnmapped(report) {
 function renderDistribution(ctx, host) {
   host.append(loadingPanel("Computing question-paper analytics", 4));
   ctx.api
-    .analytics(ctx.courseId, { view: "summary" }, { signal: ctx.signal })
+    .analytics(
+      ctx.courseId,
+      { view: "summary", trend_changes_limit: TREND_CHANGE_LIMIT },
+      { signal: ctx.signal },
+    )
     .then((report) => host.replaceChildren(renderDistributionReport(ctx, report)))
     .catch((error) => {
       if (isAbort(error)) return;
@@ -426,7 +443,12 @@ function renderDistributionReport(ctx, report) {
       { label: "Mapped", value: formatPercent(quality.mapping_coverage, 0) },
       { label: "Marks known", value: formatPercent(quality.marks_coverage, 0) },
       { label: "Papers", value: formatInteger(quality.question_papers) },
-      { label: "Known sessions", value: formatInteger(quality.known_sessions) },
+      {
+        label: "Known periods",
+        value: quality.known_periods
+          ? formatInteger(quality.known_periods)
+          : "Unavailable",
+      },
     ]),
   );
   if (quality.small_sample) {
@@ -438,12 +460,44 @@ function renderDistributionReport(ctx, report) {
       ),
     );
   }
-  wrap.append(truncationNotice(report));
+  const reportTruncation = truncationNotice(report);
+  if (reportTruncation) wrap.append(reportTruncation);
 
   const units = safeArray(report.mapping?.units);
   const types = safeArray(report.question_types?.primary_labels);
   const difficulty = safeArray(report.difficulty?.labels);
-  const allocations = safeArray(report.marks?.common_allocations);
+  const marks = report.marks || {};
+  const allocations = safeArray(marks.common_allocations);
+  const hasAllocations = allocations.length > 0;
+
+  const marksPanel = hasAllocations
+    ? panel(
+        "Marks allocations",
+        { eyebrow: "Stated marks only", description: "Missing marks remain missing; no totals are inferred." },
+        barChart(
+          allocations.map((row) => ({ label: `${formatNumber(row.marks, 1)} marks`, value: row.question_count })),
+          { title: "Most common stated marks", limit: 10 },
+        ),
+      )
+    : panel(
+        "Marks data coverage",
+        {
+          eyebrow: "Coverage, not inference",
+          description:
+            "No stated marks are stored for this course, so allocations cannot be shown. Coverage is reported instead; no marks are inferred.",
+        },
+        barChart(
+          [
+            { label: "Stated marks", value: marks.questions_with_marks || 0, tone: "positive" },
+            { label: "Marks not stated", value: marks.missing_marks || 0, tone: "negative" },
+          ],
+          {
+            title: "Stated vs missing marks",
+            description: "Every stored question is counted once; missing marks are never replaced with zero.",
+            valueFormat: (value) => formatInteger(value),
+          },
+        ),
+      );
 
   wrap.append(
     h(
@@ -473,14 +527,7 @@ function renderDistributionReport(ctx, report) {
           { title: "Estimated difficulty labels", limit: 8 },
         ),
       ),
-      panel(
-        "Marks allocations",
-        { eyebrow: "Stated marks only", description: "Missing marks remain missing; no totals are inferred." },
-        barChart(
-          allocations.map((row) => ({ label: `${formatNumber(row.marks, 1)} marks`, value: row.question_count })),
-          { title: "Most common stated marks", limit: 10 },
-        ),
-      ),
+      marksPanel,
     ),
   );
 
@@ -518,24 +565,7 @@ function renderDistributionReport(ctx, report) {
               rows: safeArray(report.trends.periods),
             }),
             safeArray(report.trends.changes).length
-              ? dataTable({
-                  caption: "Descriptive changes between adjacent periods",
-                  columns: [
-                    { label: "Metric", key: "metric" },
-                    { label: "From", key: "previous_period" },
-                    { label: "To", key: "current_period" },
-                    {
-                      label: "Change",
-                      render: (row) => `${formatNumber(row.delta, 2)}`,
-                      className: "numeric",
-                    },
-                    {
-                      label: "Reliable",
-                      render: (row) => statusBadge(row.reliable ? "Yes" : "Low sample", row.reliable ? "positive" : "caution"),
-                    },
-                  ],
-                  rows: report.trends.changes,
-                })
+              ? renderTrendChanges(report.trends.changes, report.truncation)
               : h("p", { class: "muted", text: "No adjacent-period change cleared the reliability thresholds." }),
           )
         : notice(
@@ -688,7 +718,10 @@ function renderExamDnaReport(profile) {
       { label: "Eligible papers", value: formatInteger(summary.eligible_papers) },
       { label: "Excluded papers", value: formatInteger(summary.excluded_papers) },
       { label: "Questions", value: formatInteger(summary.questions) },
-      { label: "Known sessions", value: formatInteger(summary.known_sessions) },
+      {
+        label: "Known periods",
+        value: formatInteger(safeArray(profile.scope?.periods).length),
+      },
       { label: "Patterns", value: formatInteger(summary.pattern_count) },
       { label: "Recurring", value: formatInteger(summary.recurring_pattern_count) },
     ]),
@@ -699,19 +732,26 @@ function renderExamDnaReport(profile) {
       profile.status === "ok" ? "neutral" : "caution",
     ),
   );
-  wrap.append(truncationNotice(profile));
+  const profileTruncation = truncationNotice(profile);
+  if (profileTruncation) wrap.append(profileTruncation);
   wrap.append(
     h(
       "div",
       { class: "chart-grid" },
       panel(
         "Question type mix",
-        { eyebrow: "Historical distribution", description: "Counts across eligible papers only." },
+        {
+          eyebrow: "Historical distribution",
+          description: "Counts across eligible papers only. Questions without a wording cue use a low-confidence defined fallback.",
+        },
         barChart(distributionRows(distributions.question_types), { title: "Question types across eligible papers", limit: 12 }),
       ),
       panel(
         "Bloom mix",
-        { eyebrow: "Estimated", description: "Estimated Bloom candidates, not examiner-validated levels." },
+        {
+          eyebrow: "Estimated",
+          description: "Estimated Bloom candidates, not examiner-validated levels; low-confidence fallbacks are included.",
+        },
         barChart(distributionRows(distributions.bloom_levels), { title: "Bloom levels across eligible papers", limit: 8 }),
       ),
       panel(
@@ -852,6 +892,120 @@ function distributionRows(rows) {
   return safeArray(rows).map((row) => ({ label: row.label, value: row.question_count }));
 }
 
+function trendValue(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "—";
+  return formatNumber(numeric, Number.isInteger(numeric) ? 0 : 2);
+}
+
+function trendDelta(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "—";
+  return `${numeric > 0 ? "+" : ""}${trendValue(numeric)}`;
+}
+
+function trendChangeCaption(rows, pair, truncation) {
+  const count = safeArray(rows).length;
+  const meta = truncation?.["trends.changes"];
+  const shown = meta && meta.shown < meta.total
+    ? ` · ${formatInteger(meta.shown)} of ${formatInteger(meta.total)} comparisons loaded`
+    : "";
+  return `Descriptive changes · ${pair.label} · ${formatInteger(count)} item${count === 1 ? "" : "s"}${shown}`;
+}
+
+function renderTrendChanges(rows, truncation) {
+  const changes = safeArray(rows);
+  const pairs = [];
+  const seen = new Set();
+  for (const row of changes) {
+    const previous = String(row.previous_period ?? "");
+    const current = String(row.current_period ?? "");
+    const key = `${previous}\u0000${current}`;
+    if (!previous || !current || seen.has(key)) continue;
+    seen.add(key);
+    pairs.push({ key, previous, current, label: `${previous} → ${current}` });
+  }
+  if (!pairs.length) {
+    return h("p", { class: "muted", text: "No adjacent-period comparison is available." });
+  }
+
+  const select = h(
+    "select",
+    { id: "trend-comparison", "aria-label": "Period comparison" },
+    ...pairs.map((pair) => h("option", { value: pair.key, text: pair.label })),
+  );
+  // Most recent comparison first; every adjacent pair remains selectable.
+  select.value = pairs[pairs.length - 1].key;
+  const tableHost = h("div");
+
+  const draw = () => {
+    const pair = pairs.find((item) => item.key === select.value) || pairs[pairs.length - 1];
+    const selected = changes.filter(
+      (row) =>
+        String(row.previous_period ?? "") === pair.previous &&
+        String(row.current_period ?? "") === pair.current,
+    );
+    tableHost.replaceChildren(
+      dataTable({
+        caption: trendChangeCaption(selected, pair, truncation),
+        columns: [
+          {
+            label: "Dimension",
+            render: (row) => humaniseCode(row.metric),
+          },
+          { label: "Item", render: (row) => row.label || "—" },
+          {
+            label: "Previous period",
+            render: (row) => `${row.previous_period}: ${trendValue(row.previous_value)}`,
+          },
+          {
+            label: "Current period",
+            render: (row) => `${row.current_period}: ${trendValue(row.current_value)}`,
+          },
+          {
+            label: "Change",
+            render: (row) => trendDelta(row.delta),
+            className: "numeric",
+          },
+          {
+            label: "Sample",
+            render: (row) =>
+              `${formatInteger(row.previous_sample)} → ${formatInteger(row.current_sample)}`,
+            className: "numeric",
+          },
+          {
+            label: "Reliable",
+            render: (row) =>
+              statusBadge(
+                row.reliable ? "Yes" : "Low sample",
+                row.reliable ? "positive" : "caution",
+              ),
+          },
+        ],
+        rows: selected,
+      }),
+    );
+  };
+
+  select.addEventListener("change", draw);
+  draw();
+  return h(
+    "div",
+    { class: "view-stack" },
+    h("p", {
+      class: "muted",
+      text: "Each row compares one metric or curriculum item across two adjacent recorded periods. The values are the stored counts; the change is current minus previous, and the sample is the number of questions behind each value.",
+    }),
+    h(
+      "label",
+      { class: "field trend-comparison-field" },
+      h("span", { text: "Compare adjacent periods" }),
+      select,
+    ),
+    tableHost,
+  );
+}
+
 // -- evolution --------------------------------------------------------------
 
 function renderEvolution(ctx, host) {
@@ -868,6 +1022,38 @@ function renderEvolution(ctx, host) {
         }),
       );
     });
+}
+
+function changeSummary(row) {
+  if (row.change_summary) {
+    const summary = String(row.change_summary).trim();
+    return summary.charAt(0).toUpperCase() + summary.slice(1);
+  }
+  const explanation = String(row.explanation || "").replace(/\s+/g, " ").trim();
+  if (!explanation) return "—";
+  return explanation.split(/(?<=[.!?])\s+/)[0];
+}
+
+function changeSideSummary(side) {
+  if (!side) return "—";
+  const start = side.date
+    ? dateOrDash(side.date)
+    : side.period
+      ? `Exam ${side.period}`
+      : "Undated";
+  const dateText =
+    side.date && side.date_to && side.date_to !== side.date
+      ? `${start} – ${dateOrDash(side.date_to)}`
+      : start;
+  const excerpt = String(side.excerpt || "").replace(/\s+/g, " ").trim();
+  const detail = excerpt.length > 150 ? `${excerpt.slice(0, 147)}…` : excerpt;
+  return h(
+    "div",
+    { class: "change-window", title: side.document_title || "" },
+    h("strong", { text: dateText }),
+    side.period ? h("div", { class: "muted small", text: `Exam period ${side.period}` }) : null,
+    detail ? h("div", { class: "muted small", text: detail }) : null,
+  );
 }
 
 function renderEvolutionReport(report) {
@@ -901,7 +1087,10 @@ function renderEvolutionReport(report) {
   wrap.append(
     panel(
       "Change events",
-      { eyebrow: "Review signals", description: "Dates come from explicit document metadata or exam sessions, not upload time." },
+      {
+        eyebrow: "Review signals",
+        description: "What changed names the largest movement in each affected type, Bloom-level or marks-share dimension; the earlier and later windows show the supporting observation. Dates come from explicit document metadata or exam sessions, not upload time. An assessment-pattern change is reported only when both dated windows contain enough classified questions; unclassified comparisons are omitted rather than guessed.",
+      },
       safeArray(report.changes).length
         ? dataTable({
             caption: "Concept change events",
@@ -909,18 +1098,33 @@ function renderEvolutionReport(report) {
               { label: "Category", render: (row) => humaniseCode(row.category) },
               { label: "Concept", render: (row) => safeArray(row.labels).join(", ") || "—" },
               {
-                label: "Earlier",
+                label: "What changed",
+                className: "change-column",
                 render: (row) =>
-                  row.earlier
-                    ? `${row.earlier.document_title}${row.earlier.date ? ` · ${dateOrDash(row.earlier.date)}` : ""}`
-                    : "—",
+                  h(
+                    "div",
+                    { class: "change-cell" },
+                    h("p", { class: "change-summary", text: changeSummary(row) }),
+                    h(
+                      "details",
+                      { class: "inline-details" },
+                      h("summary", { text: "Details" }),
+                      h("p", { text: row.explanation }),
+                      h(
+                        "ul",
+                        {},
+                        ...safeArray(row.evidence).slice(0, 4).map((item) => h("li", { text: item })),
+                      ),
+                    ),
+                  ),
               },
               {
-                label: "Later",
-                render: (row) =>
-                  row.later
-                    ? `${row.later.document_title}${row.later.date ? ` · ${dateOrDash(row.later.date)}` : ""}`
-                    : "—",
+                label: "Earlier window",
+                render: (row) => changeSideSummary(row.earlier),
+              },
+              {
+                label: "Later window",
+                render: (row) => changeSideSummary(row.later),
               },
               {
                 label: "Confidence",
@@ -931,21 +1135,6 @@ function renderEvolutionReport(report) {
                 label: "Review",
                 render: (row) =>
                   statusBadge(row.review_required ? "Review" : "Observed", row.review_required ? "caution" : "positive"),
-              },
-              {
-                label: "Explanation",
-                render: (row) =>
-                  h(
-                    "details",
-                    { class: "inline-details" },
-                    h("summary", { text: "Read" }),
-                    h("p", { text: row.explanation }),
-                    h(
-                      "ul",
-                      {},
-                      ...safeArray(row.evidence).slice(0, 4).map((item) => h("li", { text: item })),
-                    ),
-                  ),
               },
             ],
             rows: safeArray(report.changes),

@@ -75,7 +75,10 @@ def _template(
     )
 
 
-def _build() -> dict[tuple[GenerationFormat, BloomLevel], Template]:
+def _build() -> tuple[
+    dict[tuple[GenerationFormat, BloomLevel], Template],
+    dict[tuple[GenerationFormat, BloomLevel], tuple[Template, ...]],
+]:
     entries = [
         # -- multiple choice ------------------------------------------------
         # The excerpt is masked at the concept label, otherwise the correct option
@@ -110,6 +113,30 @@ def _build() -> dict[tuple[GenerationFormat, BloomLevel], Template]:
             BloomLevel.UNDERSTAND,
             "Explain the following topic in your own words, using the treatment in "
             "{unit}: {concept}.",
+            answer_mode="excerpt",
+        ),
+        _template(
+            "short_explain_example",
+            GenerationFormat.SHORT_ANSWER,
+            BloomLevel.UNDERSTAND,
+            "Using the course material for {unit}, explain {concept} in your own words "
+            "and give one example of how it is used.",
+            answer_mode="excerpt",
+        ),
+        _template(
+            "short_explain_why",
+            GenerationFormat.SHORT_ANSWER,
+            BloomLevel.UNDERSTAND,
+            "Explain what {concept} means in the context of {unit}, and state why it "
+            "matters in this course.",
+            answer_mode="excerpt",
+        ),
+        _template(
+            "short_explain_apply",
+            GenerationFormat.SHORT_ANSWER,
+            BloomLevel.UNDERSTAND,
+            "Describe {concept} from {unit} and explain how you would use it in a "
+            "problem or worked example.",
             answer_mode="excerpt",
         ),
         # -- explanation ----------------------------------------------------
@@ -324,11 +351,21 @@ def _build() -> dict[tuple[GenerationFormat, BloomLevel], Template]:
             needs=("passage", "numeric"),
         ),
     ]
-    return {(item.format, item.bloom): item for item in entries}
+    canonical: dict[tuple[GenerationFormat, BloomLevel], Template] = {}
+    variants: dict[tuple[GenerationFormat, BloomLevel], list[Template]] = {}
+    for item in entries:
+        key = (item.format, item.bloom)
+        canonical.setdefault(key, item)
+        variants.setdefault(key, []).append(item)
+    return canonical, {key: tuple(items) for key, items in variants.items()}
 
 
+_TEMPLATE_INDEX, _VARIANT_INDEX = _build()
 TEMPLATES: MappingProxyType[tuple[GenerationFormat, BloomLevel], Template] = MappingProxyType(
-    _build()
+    _TEMPLATE_INDEX
+)
+TEMPLATE_VARIANTS: MappingProxyType[tuple[GenerationFormat, BloomLevel], tuple[Template, ...]] = (
+    MappingProxyType(_VARIANT_INDEX)
 )
 
 #: Formats a template can produce at all. Numerical problems need a language model
@@ -403,6 +440,12 @@ def template_for(fmt: GenerationFormat, bloom: BloomLevel) -> Template | None:
     return TEMPLATES.get((fmt, bloom))
 
 
+def templates_for(fmt: GenerationFormat, bloom: BloomLevel) -> tuple[Template, ...]:
+    """Return every compatible wording for a format/Bloom pair."""
+
+    return TEMPLATE_VARIANTS.get((fmt, bloom), ())
+
+
 def supported_pairs() -> list[tuple[GenerationFormat, BloomLevel]]:
     return sorted(TEMPLATES, key=lambda item: (item[0].value, item[1].value))
 
@@ -458,10 +501,12 @@ __all__ = [
     "OBJECTIVE_VERBS",
     "TEMPLATES",
     "TEMPLATE_FORMATS",
+    "TEMPLATE_VARIANTS",
     "FormatSupport",
     "Template",
     "format_support",
     "needs_of",
     "supported_pairs",
     "template_for",
+    "templates_for",
 ]

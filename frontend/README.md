@@ -34,5 +34,12 @@ DOM API instead.
 machine and formatting helpers (`ui-state.js`), chart data (`charts.js`), API
 response parsing, the avatar's state/caption/cleanup contract, and static-asset
 guarantees (local references, CSP-compatible scripts, reduced motion, Hairline
-pin/provenance). Browser rendering is exercised through the Python HTTP tests
-plus manual verification; no competing browser test framework is introduced.
+pin/provenance).
+
+`npm run test:browser` runs a separate Playwright Core smoke test against the
+installed Chrome or Edge browser. It seeds an isolated temporary SQLite database,
+starts the dashboard on an available loopback port, checks a Practice answer and
+approves its Draft, verifies the approval survives a reload, then removes the
+database and server. It never reads `exam_engine.db`. `playwright-core` does not
+download a browser; set `BROWSER_EXECUTABLE` to override the detected Chrome/Edge
+path. The normal `npm test` command does not run this browser test.

@@ -226,6 +226,9 @@ Migration `0003_nlp_foundation.sql` adds: `processed_texts`, `document_sections`
 cascade from `courses`/`documents`, so removing a course removes its analysis
 without touching other courses. `nlp_runs` is the audit trail for every analysis
 attempt, including failures, so the CLI can show what ran and with which models.
+Migration `0011_nlp_info_only_status.sql` is a data-only repair: it reclassifies
+legacy `partial` runs whose findings are all informational and leaves their
+warnings attached.
 
 Every analysis run replaces the course's derived rows: keyphrases, entities,
 concepts, topics, sections and embeddings are deleted and rebuilt, while
@@ -261,9 +264,12 @@ run report (including the keyword, entity and topic methods).
 | `insufficient_data` | corpus too small or degenerate for topics; details record the fallback |
 | `lexical_entities` (info) | entities came from lexical rules, not a semantic model |
 
-A run is `ok` only when it produced data with no warnings, `partial` when it
-succeeded with warnings, `insufficient_data` when there was nothing to analyse,
-and `failed` when a stage raised.
+A run is `ok` when it produced data and has only informational notes. It is
+`partial` when it succeeded with at least one `warning`- or `error`-severity
+finding, `insufficient_data` when there was nothing to analyse, and `failed` when
+a stage raised. Informational notes such as `lexical_entities` or the
+section-topic fallback stay in the report without downgrading an otherwise
+successful run.
 
 ## 13. Configuration
 
@@ -304,6 +310,8 @@ scikit-learn). `sentence-transformers` and `spacy` are optional extras
 * entities for documents, sections, questions and syllabus units;
 * `lemmatize` and `strip_stopwords` actually changing keyphrase terms;
 * status reporting the latest failed run;
+* informational notes leaving a successful run `ok`, while a warning-level finding
+  still marks it `partial`;
 * `insufficient_data` for empty courses, identical texts and tiny corpora;
 * CLI commands and JSON output.
 

@@ -19,9 +19,9 @@ export function renderTutor(ctx) {
   wrap.append(
     pageHeader({
       eyebrow: `${ctx.course.course_code} · tutor workspace`,
-      title: "Grounded tutor",
+      title: "AI tutor",
       description:
-        "Answers are extractive summaries of this course's stored coverage, mapped questions, graph relationships and prerequisite paths.",
+        "Ask in your own words. The tutor teaches from this course's stored syllabus and past papers, adds cited web sources, and uses the local AI model when it is available. It labels uncertainty instead of guessing.",
     }),
   );
 
@@ -37,6 +37,7 @@ export function renderTutor(ctx) {
     ),
   );
   const capabilityHost = h("div", {}, inlineLoading("Reading tutor capabilities…"));
+  const modelNote = h("p", { class: "tutor-model", role: "status", "aria-live": "polite" });
   const contextStatus = h("p", { class: "form-status", role: "status", "aria-live": "polite" });
   const conversation = h("ol", {
     class: "conversation",
@@ -54,7 +55,7 @@ export function renderTutor(ctx) {
     name: "question",
     rows: 3,
     id: "tutor-question",
-    placeholder: "e.g. Explain binary search using the stored course material",
+    placeholder: "Ask about a topic, formula, derivation, exam focus or your own answer…",
   });
   const submit = h(
     "button",
@@ -107,12 +108,12 @@ export function renderTutor(ctx) {
 
   addTutorMessage(
     conversation,
-    "Stored-evidence tutor",
+    "AI tutor",
     [
       {
-        heading: "What this tutor does",
+        heading: "Ask the tutor",
         text:
-          "Ask about a concept in this course. I resolve it against the stored syllabus coverage and knowledge graph, then quote the mapped questions, source pages and prerequisite relationships I find. I do not use a language model and I never invent a definition, a score or a forecast.",
+          "Ask about any topic in this course. I teach from the stored syllabus and past-paper evidence, add cited web context when it helps, and use the local AI model for fuller conversation when it is available. I will say when an answer relies on general subject knowledge, and I never invent a source or a future exam question.",
       },
     ],
     { status: "speaking" },
@@ -122,6 +123,16 @@ export function renderTutor(ctx) {
     .tutorContext(ctx.courseId, { syllabus_id: selectedSyllabus(ctx) }, { signal: ctx.signal })
     .then((context) => {
       capabilityHost.replaceChildren(renderCapabilities(context.capabilities));
+      const ai = context.ai;
+      const web = context.web_search;
+      if (ai?.available) {
+        modelNote.dataset.tone = "positive";
+        modelNote.textContent = `Local AI ready${ai.model ? ` · ${ai.model}` : ""}${web?.available ? ` · ${web.provider} web search` : ""}`;
+      } else {
+        modelNote.dataset.tone = "neutral";
+        modelNote.textContent =
+          "Offline teacher mode · stored syllabus and past-paper evidence. Start Ollama for conversational answers.";
+      }
       contextStatus.textContent = context.recovery?.detail || "";
       const suggestions = safeArray(context.suggestions);
       conceptSelect.append(
@@ -185,26 +196,57 @@ export function renderTutor(ctx) {
     input.value = "";
     submit.disabled = true;
     composerStatus.dataset.tone = "neutral";
-    composerStatus.textContent = "Searching stored evidence…";
-    setAvatar("thinking", "Searching stored syllabus, questions and graph evidence.");
+    composerStatus.textContent = "Searching the course, the web and the local tutor…";
+    setAvatar("thinking", "Searching stored course evidence and cited web sources.");
     const pending = addPendingMessage(conversation);
+    let hasAnswer = false;
     try {
-      const response = await ctx.api.tutorAsk(
+      const response = await ctx.api.tutorAskStream(
         ctx.courseId,
         {
           question: text,
           concept_id: conceptId || undefined,
           syllabus_id: selectedSyllabus(ctx),
         },
-        { signal: ctx.signal },
+        {
+          signal: ctx.signal,
+          onEvent: ({ event, data }) => {
+            if (event === "status") {
+              const message = String(data?.message || "").trim();
+              if (message) {
+                pending.setStatus(message);
+                composerStatus.textContent = message;
+              }
+              if (data?.stage === "model") {
+                setAvatar("thinking", message || "Waiting for the local model.");
+              }
+              return;
+            }
+            if (event === "answer" && typeof data?.text === "string" && data.text) {
+              if (!hasAnswer) {
+                hasAnswer = true;
+                pending.setStatus("Streaming the grounded answer…");
+              }
+              pending.appendAnswer(data.text);
+              setAvatar("speaking", "Streaming the grounded answer from the local model.");
+              composerStatus.textContent = "Streaming the answer…";
+            }
+          },
+        },
       );
+      pending.dispose();
       pending.remove();
       const state = tutorStateFor(response);
-      setAvatar(state, state === "speaking" ? "Explaining from stored records." : "Returning an evidence-limited answer.");
+      setAvatar(
+        state,
+        state === "speaking"
+          ? "Explaining with course evidence and cited sources."
+          : "Returning an evidence-limited answer.",
+      );
       addTutorMessage(conversation, "Tutor", safeArray(response.sections), {
         status: response.status,
         response,
-        onFollowUp: (followUp) => ask(followUp, conceptId),
+        onFollowUp: (followUp, nextConceptId) => ask(followUp, nextConceptId || conceptId),
         onGenerate: response.concept
           ? async () => {
               await generateFollowUp(response.concept, syllabus?.querySelector("select")?.value || selectedSyllabus(ctx));
@@ -214,11 +256,16 @@ export function renderTutor(ctx) {
       composerStatus.dataset.tone = "positive";
       composerStatus.textContent =
         response.status === "answered"
-          ? "Answer assembled from stored records."
+          ? response.ai
+            ? response.ai.web_used
+              ? "Answer generated by the local model with cited web sources."
+              : "Answer generated by the local model from stored course evidence."
+            : "Offline teacher answer from stored syllabus and past-paper evidence."
           : response.status === "insufficient_evidence"
             ? "No grounded answer; choose a known concept or add course material."
             : "This capability is not implemented.";
     } catch (error) {
+      pending.dispose();
       pending.remove();
       if (isAbort(error)) return;
       setAvatar("warning", "The request failed.");
@@ -277,9 +324,10 @@ export function renderTutor(ctx) {
           count: 1,
           format: "short_answer",
           provider: "template",
+          seed: Math.floor(Math.random() * 1_000_000_000) + 1,
           include_answer_key: true,
         },
-        { signal: ctx.signal },
+        { signal: ctx.signal, timeoutMs: 60000 },
       );
       const question = safeArray(batch.questions)[0];
       if (!question) {
@@ -338,26 +386,26 @@ export function renderTutor(ctx) {
       "div",
       { class: "tutor-layout" },
       h(
-        "aside",
-        { class: "tutor-aside" },
-        avatarHost,
-        h("p", { class: "tutor-disclaimer", text: "The avatar is a presentation layer. Every result is also available as text; the avatar never determines correctness." }),
-        panel("Capabilities", { eyebrow: "Honest boundaries" }, capabilityHost, contextStatus),
-      ),
-      h(
         "section",
         { class: "tutor-main", "aria-label": "Tutor conversation" },
         panel(
           "Ask the tutor",
           {
-            eyebrow: "Stored evidence only",
-            description: "Questions are scoped to this course. Unsupported capabilities are named, not simulated.",
+            eyebrow: "Course-grounded AI",
+            description: "Questions stay scoped to this course. Answers cite stored evidence and live web sources; uncertainty is explicit.",
           },
           syllabus,
           promptHost,
           h("div", { class: "conversation-wrap" }, conversation),
           form,
         ),
+      ),
+      h(
+        "aside",
+        { class: "tutor-aside", "aria-label": "Tutor status and capabilities" },
+        avatarHost,
+        h("p", { class: "tutor-disclaimer", text: "The avatar is a presentation layer. Every result is also available as text; the avatar never determines correctness." }),
+        panel("Capabilities", { eyebrow: "What is available" }, modelNote, capabilityHost, contextStatus),
       ),
     ),
   );
@@ -396,18 +444,64 @@ function addUserMessage(list, text) {
 }
 
 function addPendingMessage(list) {
+  const startedAt = Date.now();
+  const statusText = h("span", {
+    class: "message-progress-text",
+    text: "Preparing the tutor stream…",
+  });
+  const elapsed = h("span", { class: "message-elapsed", text: "0s elapsed" });
+  const preview = h("p", { class: "message-stream-preview" });
   const item = h(
     "li",
-    { class: "message message-tutor message-pending" },
+    { class: "message message-tutor message-pending", "aria-busy": "true" },
     h("p", { class: "message-author", text: "Tutor" }),
-    h("p", { class: "message-text", text: "Searching stored evidence…" }),
+    h(
+      "p",
+      { class: "message-progress", role: "status", "aria-live": "polite" },
+      statusText,
+      elapsed,
+    ),
+    preview,
   );
+  const updateElapsed = () => {
+    const seconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+    elapsed.textContent = `${seconds}s elapsed`;
+  };
+  updateElapsed();
+  const timer = setInterval(updateElapsed, 1000);
   list.append(item);
-  return item;
+  list.scrollTop = list.scrollHeight;
+  return {
+    setStatus(text) {
+      statusText.textContent = text;
+    },
+    appendAnswer(text) {
+      preview.textContent += text;
+      list.scrollTop = list.scrollHeight;
+    },
+    dispose() {
+      clearInterval(timer);
+      item.removeAttribute("aria-busy");
+    },
+    remove() {
+      item.remove();
+    },
+  };
 }
 
 function addTutorMessage(list, author, sections, { status = "answered", response = null, onFollowUp = null, onGenerate = null } = {}) {
   const body = h("div", { class: "message-sections" });
+  if (response?.ai) {
+    const sourceLabel = response.ai.web_used
+      ? ` · ${response.ai.web_sources || 0} web source(s)`
+      : " · stored evidence";
+    body.append(
+      h("p", {
+        class: "message-meta",
+        text: `${humaniseCode(response.ai.provider)} ${response.ai.model || ""}${sourceLabel}${response.confidence ? ` · ${response.confidence} confidence` : ""}`.trim(),
+      }),
+    );
+  }
   for (const section of sections) {
     body.append(
       h(
@@ -424,9 +518,7 @@ function addTutorMessage(list, author, sections, { status = "answered", response
                 "ul",
                 {},
                 ...section.citations.map((citation) =>
-                  h("li", {
-                    text: `${citation.document_title || citation.title || citation.kind || "record"}${citation.page_number ? `, page ${citation.page_number}` : ""}${citation.excerpt ? ` — “${citation.excerpt}”` : ""}${citation.method ? ` [${humaniseCode(citation.method)}]` : ""}`,
-                  }),
+                  citationItem(citation),
                 ),
               ),
             )
@@ -475,9 +567,29 @@ function addTutorMessage(list, author, sections, { status = "answered", response
             {
               type: "button",
               class: "prompt-chip",
-              onClick: () => onFollowUp?.(`Explain ${suggestion.label}`),
+              onClick: () => onFollowUp?.(`Explain ${suggestion.label}`, suggestion.concept_id),
             },
             suggestion.label,
+          ),
+        ),
+      ),
+    );
+  }
+  if (safeArray(response?.follow_ups).length) {
+    body.append(
+      h(
+        "div",
+        { class: "suggestion-list" },
+        h("p", { class: "muted", text: "Keep going:" }),
+        ...response.follow_ups.map((followUp) =>
+          h(
+            "button",
+            {
+              type: "button",
+              class: "prompt-chip",
+              onClick: () => onFollowUp?.(followUp),
+            },
+            followUp,
           ),
         ),
       ),
@@ -505,6 +617,24 @@ function addTutorMessage(list, author, sections, { status = "answered", response
     ),
   );
   list.scrollTop = list.scrollHeight;
+}
+
+function citationItem(citation) {
+  const label = citation.document_title || citation.title || citation.kind || "record";
+  const meta = `${citation.page_number ? `, page ${citation.page_number}` : ""}${citation.excerpt ? ` — “${citation.excerpt}”` : ""}${citation.method ? ` [${humaniseCode(citation.method)}]` : ""}`;
+  const item = h("li", { class: "message-citation" });
+  item.append(h("span", { text: `${label}${meta}` }));
+  if (citation.url) {
+    item.append(
+      h("a", {
+        href: citation.url,
+        target: "_blank",
+        rel: "noreferrer noopener",
+        text: " Open source ↗",
+      }),
+    );
+  }
+  return item;
 }
 
 async function dynamicAvatar(ctx, host) {

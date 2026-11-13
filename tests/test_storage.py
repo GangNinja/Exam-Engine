@@ -75,6 +75,16 @@ def test_migrations_are_idempotent(database) -> None:
         "0008_advanced_assessment.sql",
         "0009_response_identified.sql",
         "0010_exam_datasets.sql",
+        "0011_nlp_info_only_status.sql",
+        "0012_dataset_recovery.sql",
+        "0013_recovery_intelligence.sql",
+        "0014_recovery_source_retrieval.sql",
+        "0015_recovery_crawl4ai_cache.sql",
+        "0016_exam_provenance.sql",
+        "0017_answer_ai.sql",
+        "0018_remove_answer_ai.sql",
+        "0019_exam_passages.sql",
+        "0020_exam_question_subparts.sql",
     ]
     assert migrate(database.engine) == []
     assert "0003_nlp_foundation.sql" in applied_migrations(database.engine)
@@ -115,6 +125,16 @@ def test_upgrade_from_initial_schema_adds_question_unit(tmp_path: Path) -> None:
         "0008_advanced_assessment.sql",
         "0009_response_identified.sql",
         "0010_exam_datasets.sql",
+        "0011_nlp_info_only_status.sql",
+        "0012_dataset_recovery.sql",
+        "0013_recovery_intelligence.sql",
+        "0014_recovery_source_retrieval.sql",
+        "0015_recovery_crawl4ai_cache.sql",
+        "0016_exam_provenance.sql",
+        "0017_answer_ai.sql",
+        "0018_remove_answer_ai.sql",
+        "0019_exam_passages.sql",
+        "0020_exam_question_subparts.sql",
     ]
     with engine.connect() as conn:
         columns = [row[1] for row in conn.exec_driver_sql("PRAGMA table_info(questions)")]

@@ -332,6 +332,43 @@ class CoverageDataQuality(BaseModel):
     warnings: list[Uncertainty] = Field(default_factory=list)
 
 
+class CoverageQuestionAssignment(BaseModel):
+    """One question's best-fit concept for the complete mapping table.
+
+    This is a review aid: accepted Phase 3/5/topic mappings are used first, and
+    questions without a topic match receive a conservative best-fit assignment
+    so the question is not hidden from the corpus table.  ``confidence`` is an
+    evidence-strength display score on the 75--100% band, not a calibrated
+    probability that the question will be examined.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    question_id: str
+    document_id: str
+    document_title: str
+    question_number: str | None = None
+    section: str | None = None
+    page_number: int | None = Field(default=None, ge=1)
+    source_locator: str | None = None
+    text_excerpt: str
+    concept_id: str
+    concept_label: str
+    unit_ids: list[str] = Field(default_factory=list)
+    unit_labels: list[str] = Field(default_factory=list)
+    assignment_source: str
+    assignment_method: str
+    score: float | None = Field(default=None, ge=0.0, le=1.0)
+    confidence: float = Field(default=0.75, ge=0.0, le=1.0)
+    matched_terms: list[str] = Field(default_factory=list)
+    evidence: list[str] = Field(default_factory=list)
+    analysis_status: MappingStatus | None = None
+    exam_period: str
+    exam_period_source: str
+    exam_session: str | None = None
+    exam_type: str | None = None
+
+
 class CoverageReport(BaseModel):
     """One reproducible Phase 7 report for one course and syllabus version."""
 
@@ -350,6 +387,7 @@ class CoverageReport(BaseModel):
     summary: CoverageSummary
     concepts: list[ConceptCoverageFinding] = Field(default_factory=list)
     units: list[UnitCoverageFinding] = Field(default_factory=list)
+    question_assignments: list[CoverageQuestionAssignment] = Field(default_factory=list)
     unmapped_questions: list[UnmappedQuestionFinding] = Field(default_factory=list)
     data_quality: CoverageDataQuality
     warnings: list[Uncertainty] = Field(default_factory=list)
@@ -364,6 +402,7 @@ __all__ = [
     "CoverageDataQuality",
     "CoverageFilters",
     "CoverageMappingCandidate",
+    "CoverageQuestionAssignment",
     "CoverageQuestionEvidence",
     "CoverageReport",
     "CoverageRequest",

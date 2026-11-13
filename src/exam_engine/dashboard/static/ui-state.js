@@ -169,6 +169,12 @@ export function barData(items, { labelKey = "label", valueKey = "value", limit =
   }));
 }
 
+export function barSeries(items, { limit = 30 } = {}) {
+  const all = barData(items, { limit: (items || []).length || 1 });
+  const rows = all.slice(0, Math.max(0, Number(limit) || 0));
+  return { rows, total: all.length, shown: rows.length, truncated: rows.length < all.length };
+}
+
 export function segmentData(segments) {
   const rows = (segments || [])
     .map((item) => ({

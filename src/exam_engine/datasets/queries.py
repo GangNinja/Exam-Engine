@@ -7,15 +7,26 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy.orm import Session
 
+from exam_engine.datasets.parsing import (
+    ParsedOption,
+    extract_correct_option,
+    extract_passage_subparts,
+    is_passage_question,
+    parse_options,
+    parse_options_from_text,
+    plausible_passage_options,
+    strip_embedded_options,
+)
 from exam_engine.storage.exam_repository import ExamDatasetRepository
 from exam_engine.storage.schema import (
     CourseRow,
     DocumentRow,
     ExamAnswerRow,
     ExamPaperRow,
+    ExamPassageRow,
     ExamQuestionDetailRow,
     QuestionRow,
     QuestionUnitMatchRow,
@@ -34,6 +45,7 @@ class ExamFilters:
     answer_type: str | None = None
     unit_id: str | None = None
     topic: str | None = None
+    question_id: str | None = None
     search: str | None = None
 
     def as_query(self) -> dict[str, Any]:
@@ -46,6 +58,7 @@ class ExamFilters:
             "answer_type": self.answer_type,
             "unit_id": self.unit_id,
             "topic": self.topic,
+            "question_id": self.question_id,
             "search": self.search,
         }
 
@@ -93,12 +106,17 @@ class ExamDatasetQueries:
                     )
                 )
             )
+        if filters.question_id:
+            conditions.append(ExamQuestionDetailRow.question_id == filters.question_id)
         if filters.search:
+            pattern = f"%{filters.search}%"
             conditions.append(
-                ExamQuestionDetailRow.question_id.in_(
-                    select(QuestionRow.question_id).where(
-                        QuestionRow.text.ilike(f"%{filters.search}%")
-                    )
+                or_(
+                    ExamQuestionDetailRow.question_id.in_(
+                        select(QuestionRow.question_id).where(QuestionRow.text.ilike(pattern))
+                    ),
+                    ExamQuestionDetailRow.source_question_id.ilike(pattern),
+                    ExamQuestionDetailRow.question_id.ilike(pattern),
                 )
             )
         return conditions
@@ -381,6 +399,163 @@ class ExamDatasetQueries:
         }
 
     # -- questions ---------------------------------------------------------
+    @staticmethod
+    def _passage_payload(
+        passage: ExamPassageRow, question_count: int | None = None
+    ) -> dict[str, Any]:
+        try:
+            child_ids = json.loads(passage.child_question_ids_json or "[]")
+        except (TypeError, json.JSONDecodeError):
+            child_ids = []
+        return {
+            "passage_id": passage.passage_id,
+            "course_id": passage.course_id,
+            "text": passage.passage_text,
+            "source_reference": passage.source_reference,
+            "source_file": passage.source_file,
+            "confidence": passage.confidence,
+            "child_question_ids": child_ids if isinstance(child_ids, list) else [],
+            "question_count": (
+                question_count if question_count is not None else len(child_ids)
+            ),
+        }
+
+    def _question_payload(
+        self,
+        detail: ExamQuestionDetailRow,
+        question: QuestionRow,
+        answer: ExamAnswerRow | None,
+        paper: ExamPaperRow,
+        passage: ExamPassageRow | None,
+    ) -> dict[str, Any]:
+        question_text = str(question.text or "")
+        answer_type = answer.answer_type if answer is not None else None
+        passage_question = is_passage_question(question_text)
+        passage_subparts = (
+            extract_passage_subparts(question_text)
+            if passage_question and answer_type != "mcq_option"
+            else []
+        )
+        try:
+            options = json.loads(detail.options_json or "[]")
+        except (TypeError, json.JSONDecodeError):
+            options = []
+        parsed_options = []
+        if isinstance(options, list):
+            for item in options:
+                if not isinstance(item, dict):
+                    continue
+                key = str(item.get("key") or "").strip()
+                text = str(item.get("text") or "").strip()
+                if key and text:
+                    parsed_options.append(ParsedOption(key=key, text=text))
+        # Lettered passage questions are prompts, not answer choices.  Keep
+        # stored A-D options for a single passage MCQ, but drop options on a
+        # descriptive passage with detected subparts.
+        if passage_question and answer_type != "mcq_option" and passage_subparts:
+            parsed_options = []
+            options = []
+        if passage_question and not plausible_passage_options(parsed_options):
+            parsed_options = []
+            options = []
+        # Older imports retained the source options in question.metadata_json
+        # but left the structured detail column empty. Read-time recovery makes
+        # those options visible without rewriting production rows. It also
+        # handles source option lists copied into the question text.
+        if not parsed_options and (
+            not passage_question
+            or answer_type == "mcq_option"
+            or not passage_subparts
+        ):
+            try:
+                metadata = json.loads(question.metadata_json or "{}")
+            except (TypeError, json.JSONDecodeError):
+                metadata = {}
+            raw_options = metadata.get("options") if isinstance(metadata, dict) else None
+            answer_text = answer.answer_text if answer is not None else None
+            if isinstance(raw_options, str):
+                parsed_options = parse_options(raw_options, answer_text=answer_text)
+            if not parsed_options and (
+                detail.question_type in {"mcq", "msq", "assertion_reason"}
+                or (
+                    passage_question
+                    and (answer_type == "mcq_option" or not passage_subparts)
+                )
+            ):
+                parsed_options = parse_options_from_text(
+                    question.text, answer_text=answer_text
+                )
+            options = [option.as_dict() for option in parsed_options]
+        else:
+            options = [option.as_dict() for option in parsed_options]
+        if passage_question and len(parsed_options) > 5:
+            # A passage row with more than five recovered choices is a
+            # concatenated set of subquestions, not one MCQ option list.
+            parsed_options = []
+            options = []
+        if passage_question and not plausible_passage_options(parsed_options):
+            parsed_options = []
+            options = []
+        if passage_question and answer_type != "mcq_option" and passage_subparts:
+            parsed_options = []
+            options = []
+        correct_option_key = (
+            answer.correct_option_key if answer is not None and parsed_options else None
+        )
+        if correct_option_key is None and answer is not None and parsed_options:
+            correct_option_key = extract_correct_option(
+                answer.answer_text,
+                answer.answer_type,
+                parsed_options,
+            )
+        try:
+            subparts = json.loads(detail.subparts_json or "[]")
+        except (TypeError, json.JSONDecodeError):
+            subparts = []
+        if passage_subparts:
+            subparts = passage_subparts
+        display_text = (
+            strip_embedded_options(question_text, parsed_options)
+            if detail.question_type in {"mcq", "msq", "assertion_reason"}
+            else question_text
+        )
+        return {
+            "question_id": detail.question_id,
+            "source_question_id": detail.source_question_id,
+            "source_row": detail.source_row,
+            "category_id": detail.category_id,
+            "subject_code": detail.subject_code,
+            "course_id": detail.course_id,
+            "paper_id": detail.paper_id,
+            "paper_label": paper.paper_label,
+            "exam_year": detail.exam_year,
+            "question_type": "passage_based" if passage_question else detail.question_type,
+            "question_type_raw": detail.question_type_raw,
+            "original_question_number": detail.original_question_number,
+            "marks": question.marks,
+            "text": display_text,
+            "options": options if isinstance(options, list) else [],
+            "subparts": subparts if isinstance(subparts, list) else [],
+            "has_options": bool(options),
+            "source_file": detail.source_file,
+            "passage_id": detail.passage_id,
+            "passage_order": detail.passage_order,
+            "passage": self._passage_payload(passage) if passage is not None else None,
+            "answer": (
+                {
+                    "answer_text": answer.answer_text,
+                    "answer_type": answer.answer_type,
+                    "answer_type_raw": answer.answer_type_raw,
+                    "correct_option_key": correct_option_key,
+                    "solution_steps": answer.solution_steps,
+                    "source_answer_id": answer.source_answer_id,
+                    "match_method": answer.match_method,
+                }
+                if answer is not None
+                else None
+            ),
+        }
+
     def questions(
         self,
         filters: ExamFilters | None = None,
@@ -390,7 +565,62 @@ class ExamDatasetQueries:
     ) -> dict[str, Any]:
         filters = filters or ExamFilters()
         conditions = self._conditions(filters)
+        option_first = filters.question_type in {None, "mcq", "msq"}
+        order_by = []
+        if option_first:
+            order_by.append(ExamQuestionDetailRow.has_options.desc())
+        order_by.extend(
+            [
+                ExamQuestionDetailRow.category_id,
+                ExamQuestionDetailRow.subject_code,
+                ExamQuestionDetailRow.exam_year,
+                ExamQuestionDetailRow.paper_id,
+                QuestionRow.number_sort,
+                ExamQuestionDetailRow.source_question_id,
+            ]
+        )
         stmt: Select[Any] = (
+            select(
+                ExamQuestionDetailRow,
+                QuestionRow,
+                ExamAnswerRow,
+                ExamPaperRow,
+                ExamPassageRow,
+            )
+            .join(QuestionRow, QuestionRow.question_id == ExamQuestionDetailRow.question_id)
+            .join(ExamPaperRow, ExamPaperRow.paper_id == ExamQuestionDetailRow.paper_id)
+            .outerjoin(
+                ExamAnswerRow,
+                ExamAnswerRow.question_id == ExamQuestionDetailRow.question_id,
+            )
+            .outerjoin(
+                ExamPassageRow,
+                ExamPassageRow.passage_id == ExamQuestionDetailRow.passage_id,
+            )
+            .where(*conditions)
+            .order_by(*order_by)
+            .limit(limit)
+            .offset(offset)
+        )
+        rows = self.session.execute(stmt).all()
+        payload = [
+            self._question_payload(detail, question, answer, paper, passage)
+            for detail, question, answer, paper, passage in rows
+        ]
+        return {
+            "questions": payload,
+            "total": self._question_count(filters),
+            "shown": len(payload),
+            "limit": limit,
+            "offset": offset,
+        }
+
+    def passage(self, passage_id: str) -> dict[str, Any] | None:
+        """Return one passage with every linked question in stored order."""
+        passage = self.session.get(ExamPassageRow, passage_id)
+        if passage is None:
+            return None
+        rows = self.session.execute(
             select(
                 ExamQuestionDetailRow,
                 QuestionRow,
@@ -403,62 +633,55 @@ class ExamDatasetQueries:
                 ExamAnswerRow,
                 ExamAnswerRow.question_id == ExamQuestionDetailRow.question_id,
             )
-            .where(*conditions)
+            .where(ExamQuestionDetailRow.passage_id == passage_id)
             .order_by(
-                ExamQuestionDetailRow.category_id,
-                ExamQuestionDetailRow.subject_code,
-                ExamQuestionDetailRow.exam_year,
-                ExamQuestionDetailRow.paper_id,
+                ExamQuestionDetailRow.passage_order.is_(None),
+                ExamQuestionDetailRow.passage_order,
+                ExamQuestionDetailRow.source_row,
                 QuestionRow.number_sort,
                 ExamQuestionDetailRow.source_question_id,
             )
-            .limit(limit)
-            .offset(offset)
-        )
-        rows = self.session.execute(stmt).all()
-        payload = []
-        for detail, question, answer, paper in rows:
-            payload.append(
-                {
-                    "question_id": detail.question_id,
-                    "source_question_id": detail.source_question_id,
-                    "source_row": detail.source_row,
-                    "category_id": detail.category_id,
-                    "subject_code": detail.subject_code,
-                    "course_id": detail.course_id,
-                    "paper_id": detail.paper_id,
-                    "paper_label": paper.paper_label,
-                    "exam_year": detail.exam_year,
-                    "question_type": detail.question_type,
-                    "question_type_raw": detail.question_type_raw,
-                    "original_question_number": detail.original_question_number,
-                    "marks": question.marks,
-                    "text": question.text,
-                    "options": json.loads(detail.options_json or "[]"),
-                    "has_options": bool(detail.has_options),
-                    "source_file": detail.source_file,
-                    "answer": (
-                        {
-                            "answer_text": answer.answer_text,
-                            "answer_type": answer.answer_type,
-                            "answer_type_raw": answer.answer_type_raw,
-                            "correct_option_key": answer.correct_option_key,
-                            "solution_steps": answer.solution_steps,
-                            "source_answer_id": answer.source_answer_id,
-                            "match_method": answer.match_method,
-                        }
-                        if answer is not None
-                        else None
-                    ),
-                }
+        ).all()
+        questions = [
+            self._question_payload(detail, question, answer, paper, passage)
+            for detail, question, answer, paper in rows
+        ]
+        payload = self._passage_payload(passage, len(questions))
+        payload["questions"] = questions
+        payload["missing_child_question_ids"] = [
+            child_id
+            for child_id in payload["child_question_ids"]
+            if child_id not in {item["source_question_id"] for item in questions}
+        ]
+        return payload
+
+    def question(self, question_id: str) -> dict[str, Any] | None:
+        """Return one independently addressable question, retaining its passage."""
+        row = self.session.execute(
+            select(
+                ExamQuestionDetailRow,
+                QuestionRow,
+                ExamAnswerRow,
+                ExamPaperRow,
+                ExamPassageRow,
             )
-        return {
-            "questions": payload,
-            "total": self._question_count(filters),
-            "shown": len(payload),
-            "limit": limit,
-            "offset": offset,
-        }
+            .join(QuestionRow, QuestionRow.question_id == ExamQuestionDetailRow.question_id)
+            .join(ExamPaperRow, ExamPaperRow.paper_id == ExamQuestionDetailRow.paper_id)
+            .outerjoin(
+                ExamAnswerRow,
+                ExamAnswerRow.question_id == ExamQuestionDetailRow.question_id,
+            )
+            .outerjoin(
+                ExamPassageRow,
+                ExamPassageRow.passage_id == ExamQuestionDetailRow.passage_id,
+            )
+            .where(ExamQuestionDetailRow.question_id == question_id)
+        ).first()
+        if row is None:
+            return None
+        detail, question, answer, paper, passage = row
+        payload = self._question_payload(detail, question, answer, paper, passage)
+        return {"question": payload, "passage": payload["passage"]}
 
     # -- papers ------------------------------------------------------------
     def papers(
